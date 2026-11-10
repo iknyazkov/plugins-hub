@@ -1,0 +1,6 @@
+github.com/barbashov/telegramify-markdown-go v0.2.0 h1:yuXD6HSclfUohFUzVSLIiieJLQrxu4dyKIogc4J/7V0=
+github.com/barbashov/telegramify-markdown-go v0.2.0/go.mod h1:czLbw1u3e456W4A3Tv9nGcfkzvPNMn107m+Tuy/BASE=
+github.com/go-telegram/bot v1.30.0 h1:jqx9fw3QFfgZhR5e7Tp8dlFqoASHmmFy6OrLwbk13uA=
+github.com/go-telegram/bot v1.30.0/go.mod h1:i2TRs7fXWIeaceF3z7KzsMt/he0TwkVC680mvdTFYeM=
+github.com/yuin/goldmark v1.8.7 h1:XT/tNqCIbabh0ln675w4x3dv04kQBKi8NwYqi9IJaxI=
+github.com/yuin/goldmark v1.8.7/go.mod h1:ip/1k0VRfGynBgxOz0yCqHrbZXhcjxyuS66Brc7iBKg=

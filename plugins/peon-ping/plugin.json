@@ -1,0 +1,5 @@
+{
+  "name": "peon-ping",
+  "version": "0.1.2",
+  "description": "Game-character sound notifications for Claude Code events: hooks on session lifecycle, /peon-ping-toggle, /peon-ping-config, and an MCP server for agent-chosen sounds. Engine lives in a pinned git submodule."
+}

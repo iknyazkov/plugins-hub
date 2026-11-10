@@ -1,0 +1,6 @@
+{
+  "name": "ecs-game-feature",
+  "version": "0.1.0",
+  "description": "Implement game features on the custom Go ECS in pkg/ecs: design interview via grilling first, then components, systems, wiring, and tests following repo conventions.",
+  "dependencies": ["grilling"]
+}

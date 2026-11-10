@@ -1,0 +1,5 @@
+{
+  "name": "dev",
+  "version": "0.1.2",
+  "description": "Working principles for code changes via the ub-mode skill (tracked as a pinned git submodule of github.com/unclebob/ub-mode): every change follows First Make it Work, then Then Make it Right, then Practice. The ub-setup command installs the external analysis tools (crapper, dryer, mutator) used by the Then Make it Right sections. Use when the user runs /ub-mode or asks for the reduced principles."
+}

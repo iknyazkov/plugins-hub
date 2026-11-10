@@ -1,0 +1,10 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "websearch": {
+      "type": "stdio",
+      "command": "make",
+      "args": ["-C", "${CLAUDE_PLUGIN_ROOT}/engine", "mcp"]
+    }
+  }
+}

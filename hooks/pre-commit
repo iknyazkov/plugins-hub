@@ -1,0 +1,25 @@
+#!/bin/sh
+# Block commits that look like they contain secrets.
+# Values never live in this repo; only variable names are allowed.
+
+# sk- keys are matched only outside words (preceded by non-alphanumeric,
+# incl. the '+' diff prefix) so prose like "task-notification" doesn't trip.
+PATTERNS='(^|[^A-Za-z0-9])sk-[A-Za-z0-9_-]{8,}|api[_-]?key["'"'"' ]*[=:][[:space:]]*[^[:space:]"'"'"']{8,}|(token|secret|password)["'"'"' ]*[=:][[:space:]]*[^[:space:]"'"'"']{8,}|Bearer[[:space:]]+[A-Za-z0-9._-]{15,}'
+
+ADDED=$(git diff --cached -U0 | grep '^+' | grep -v '^+++')
+
+# Values that are code references — calls, dict lookups, argument lists (the
+# run contains brackets/braces/quotes and ends in ")" "," or "]") — are
+# variable/attribute names (the "names only" norm), not pasted literals.
+# Literal secret shapes (ghp_…, eyJ…, bare hex) still end alnum and stay flagged.
+MATCHES=$(echo "$ADDED" | grep -E "$PATTERNS" \
+  | grep -vE '(token|secret|password)["'"'"' ]*[=:][[:space:]]*[A-Za-z0-9_./+=%"{}()-]*[][),]')
+
+if [ -n "$MATCHES" ]; then
+  echo "pre-commit: possible secrets in staged changes:" >&2
+  echo "$MATCHES" | sed 's/^/  /' >&2
+  echo "Commit blocked. Keep real values out of the repo (names only)." >&2
+  exit 1
+fi
+
+exit 0

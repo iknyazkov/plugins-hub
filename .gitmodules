@@ -1,0 +1,9 @@
+[submodule "plugins/peon-ping/engine"]
+	path = plugins/peon-ping/engine
+	url = https://github.com/PeonPing/peon-ping
+[submodule "plugins/web/engine"]
+	path = plugins/web/engine
+	url = https://iknyazkov@github.com/iknyazkov/websearch
+[submodule "plugins/dev/skills/ub-mode"]
+	path = plugins/dev/skills/ub-mode
+	url = https://github.com/unclebob/ub-mode

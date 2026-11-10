@@ -1,0 +1,5 @@
+{
+  "name": "yag",
+  "version": "0.2.0",
+  "description": "Yet another gateway: telegram-driven tmux control daemon. Built from source and launched on session start."
+}

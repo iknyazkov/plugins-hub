@@ -1,0 +1,24 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "WebFetch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Built-in WebFetch is disabled by the web plugin. Use the mcp__plugin_web_websearch__WebFetch tool instead (same url/prompt arguments).\"}}'"
+          }
+        ]
+      },
+      {
+        "matcher": "WebSearch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Built-in WebSearch is disabled by the web plugin. Use the mcp__plugin_web_websearch__WebSearch tool instead (same query arguments).\"}}'"
+          }
+        ]
+      }
+    ]
+  }
+}
