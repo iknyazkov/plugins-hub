@@ -1,0 +1,29 @@
+[project]
+name = "channelsrv"
+version = "0.0.15"
+requires-python = ">=3.11"
+dependencies = [
+    "python-telegram-bot[socks]>=22",
+    "telegramify-markdown>=0.5",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.16.5",
+    "mypy>=2.3.1",
+    "pytest>=8",
+    "pytest-asyncio>=1",
+]
+
+[project.scripts]
+channelsrv = "channelsrv.main:main"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.mypy]
+strict = true
+
+[tool.uv]
+package = true

@@ -1,0 +1,5 @@
+{
+  "name": "refactoring",
+  "version": "0.1.0",
+  "description": "Apply a structured, language-agnostic refactoring pass to any package or set of packages. Use when the user asks to \"refactor\" code, wants a refactor guided by rules. Produces readable, understandable code — no corners cut for speed."
+}

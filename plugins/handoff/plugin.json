@@ -1,0 +1,5 @@
+{
+  "name": "handoff",
+  "version": "0.1.2",
+  "description": "Compact the current conversation into a handoff document for the next agent and resume from it later: /handoff:handoff writes, /handoff:pick-up consumes — script-managed queue of up to 3 per-project files in the OS temp dir."
+}

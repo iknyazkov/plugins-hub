@@ -1,0 +1,72 @@
+{
+  "name": "plugins-hub",
+  "owner": {
+    "name": "fivecoil"
+  },
+  "description": "Personal plugin hub for Claude Code and Codex: skills, agents, commands, hooks and MCP.",
+  "plugins": [
+    {
+      "name": "grilling",
+      "source": "./plugins/grilling",
+      "description": "Grill the user relentlessly about a plan, decision, or idea via design-tree interview rounds.",
+      "version": "0.1.1"
+    },
+    {
+      "name": "code-migration",
+      "source": "./plugins/code-migration",
+      "description": "Run a large-scale language migration with the six-step process: create the map and the rules, stress-test the rules, translate everything, compile, run it, match behavior.",
+      "version": "0.1.0"
+    },
+    {
+      "name": "ecs-game-feature",
+      "source": "./plugins/ecs-game-feature",
+      "description": "Implement game features on the custom Go ECS in pkg/ecs: design interview via grilling first, then components, systems, wiring, and tests following repo conventions.",
+      "version": "0.1.0"
+    },
+    {
+      "name": "peon-ping",
+      "source": "./plugins/peon-ping",
+      "description": "Game-character sound notifications for Claude Code events: hooks on session lifecycle, /peon-ping-toggle, /peon-ping-config, and an MCP server for agent-chosen sounds. Engine lives in a pinned git submodule.",
+      "version": "0.1.2"
+    },
+    {
+      "name": "refactoring",
+      "source": "./plugins/refactoring",
+      "description": "Apply a structured, language-agnostic refactoring pass to any package or set of packages. Use when the user asks to \"refactor\" code, wants a refactor guided by rules. Produces readable, understandable code — no corners cut for speed.",
+      "version": "0.1.0"
+    },
+    {
+      "name": "web",
+      "source": "./plugins/web",
+      "description": "Web research via the vendored websearch engine exposed as an MCP server (pinned submodule, launched via make mcp): /web:search for a quick grounded answer (sources read, cited, unverified), /web:deep-research for an adversarially verified deep-research report. A PreToolUse hook denies the built-in WebFetch/WebSearch and points the model at the plugin's MCP tools.",
+      "version": "0.1.11"
+    },
+    {
+      "name": "dev",
+      "source": "./plugins/dev",
+      "description": "Working principles for code changes via the ub-mode skill (tracked as a pinned git submodule of github.com/unclebob/ub-mode): every change follows First Make it Work, then Then Make it Right, then Practice. The ub-setup command installs the external analysis tools (crapper, dryer, mutator). Use when the user runs /ub-mode or asks for the reduced principles.",
+      "version": "0.1.2"
+    },
+    {
+      "name": "handoff",
+      "source": "./plugins/handoff",
+      "description": "Compact the current conversation into a handoff document for the next agent and resume from it later: /handoff:handoff writes, /handoff:pick-up consumes — script-managed queue of up to 3 per-project files in the OS temp dir.",
+      "version": "0.1.2"
+    },
+    {
+      "name": "rea",
+      "description": "Reverse engineer anything with agents, from app behavior down to native binaries: binaries, Electron/JavaScript apps, .NET assemblies, packaged apps, firmware, and websites, via the rea-agents MCP server installed from npm.",
+      "source": {
+        "source": "npm",
+        "package": "rea-agents",
+        "version": "6.8.0"
+      }
+    },
+    {
+      "name": "channel",
+      "source": "./plugins/channel",
+      "description": "Telegram remote control for agent sessions: hooks + tmux paste deliver messages into the session and replies back, with a resident MCP bridge fallback; both keep the bundled channelsrv daemon alive.",
+      "version": "0.1.19"
+    }
+  ]
+}

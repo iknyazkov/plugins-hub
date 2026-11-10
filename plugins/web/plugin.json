@@ -1,0 +1,5 @@
+{
+  "name": "web",
+  "version": "0.1.11",
+  "description": "Web research via the vendored websearch engine exposed as an MCP server (pinned submodule, launched via make mcp): /web:search for a quick grounded answer (sources read, cited, unverified), /web:deep-research for an adversarially verified deep-research report. A PreToolUse hook denies the built-in WebFetch/WebSearch and points the model at the plugin's MCP tools."
+}

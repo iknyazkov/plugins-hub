@@ -1,0 +1,5 @@
+{
+  "name": "code-migration",
+  "version": "0.1.0",
+  "description": "Run a large-scale language migration with the six-step process: create the map and the rules, stress-test the rules, translate everything, compile, run it, match behavior."
+}

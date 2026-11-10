@@ -1,0 +1,313 @@
+#!/usr/bin/env python3
+"""Claude Code hook shim for channelsrv: session events in, Telegram control out.
+
+Runs from the plugin's hooks/hooks.json. Only tmux sessions participate: the
+pane ($TMUX_PANE) is the delivery target the daemon pastes user messages into.
+
+  SessionStart      -> ensure daemon + register (tmux_target = $TMUX_PANE)
+  UserPromptSubmit  -> status thinking
+  Stop              -> reply with last_assistant_message, status idle
+  SessionEnd        -> deregister
+  PermissionRequest -> AskUserQuestion is denied outright (its answer
+                       dialog cannot reach Telegram — ask in plain text);
+                       anything else gets an approval card, then a brief
+                       wait for a Telegram verdict and the decision JSON;
+                       without one, exit quietly and the normal dialog shows
+
+Any failure exits 0 with a note on stderr — a hook must never break a session.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+import time
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bridge"))
+import channel_mcp as bridge  # noqa: E402
+
+VERDICT_WAIT = float(os.environ.get("CHANNEL_HOOK_VERDICT_WAIT", "20"))
+SUMMARY_LIMIT = 300
+
+
+def log(message: str) -> None:
+    print(f"channel-hook: {message}", file=sys.stderr)
+
+
+def tmux_session_name() -> str | None:
+    """The tmux session hosting this pane; None outside tmux or on any failure."""
+    if not os.environ.get("TMUX"):
+        return None
+    try:
+        out = subprocess.run(
+            ["tmux", "display-message", "-p", "#{session_name}"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+    except Exception:
+        return None
+    return out.stdout.strip() or None
+
+
+def identity(input_data: dict) -> tuple[str, str, str] | None:
+    """(agent_id, name, cwd) for this session; None outside tmux."""
+    pane = os.environ.get("TMUX_PANE")
+    if not pane:
+        return None
+    cwd = input_data.get("cwd") or os.getcwd()
+    base = os.path.basename(cwd) or "session"
+    slug = "".join(c if (c.isalnum() or c in "._-") else "-" for c in base).strip("-") or "session"
+    # the pane number is what distinguishes sibling sessions in one directory
+    pane_num = pane.lstrip("%") or pane
+    session = tmux_session_name()
+    name = os.environ.get("CHANNEL_AGENT_NAME") or (
+        f"{session}-{base}-{pane_num}" if session else f"{base}-{pane_num}"
+    )
+    return f"claude-{slug}-{pane}", name, cwd
+
+
+def register(agent_id: str, name: str, cwd: str) -> None:
+    bridge.ensure_daemon()
+    resp = bridge.call_op(
+        {
+            "v": bridge.PROTOCOL_VERSION,
+            "op": "register",
+            "agent_id": agent_id,
+            "name": name,
+            "session_name": os.environ.get("CHANNEL_SESSION_NAME") or cwd,
+            "modes": [],
+            "tmux_target": os.environ["TMUX_PANE"],
+        },
+        bridge.OP_TIMEOUT,
+    )
+    if resp.get("ok") is not True:
+        raise RuntimeError(f"register rejected: {resp.get('error')}")
+    log(f"registered {agent_id} -> {os.environ['TMUX_PANE']}")
+
+
+def op(payload: dict, ids: tuple[str, str, str], retry: bool = True) -> dict:
+    """One daemon op; on 'not registered' (daemon restarted mid-session) re-register once."""
+    agent_id, name, cwd = ids
+    try:
+        resp = bridge.call_op(payload, bridge.OP_TIMEOUT)
+    except bridge.TransportError:
+        if not retry:
+            raise
+        register(agent_id, name, cwd)
+        return op(payload, ids, retry=False)
+    if resp.get("ok") is not True and retry and "not registered" in str(resp.get("error", "")):
+        register(agent_id, name, cwd)
+        return op(payload, ids, retry=False)
+    return resp
+
+
+def shorten(text: str, limit: int = SUMMARY_LIMIT) -> str:
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def on_session_start(ids: tuple[str, str, str]) -> None:
+    register(*ids)
+
+
+def on_prompt_submit(ids: tuple[str, str, str]) -> None:
+    op({"v": bridge.PROTOCOL_VERSION, "op": "status", "agent_id": ids[0], "status": "thinking"}, ids)
+
+
+def last_turn_usage(transcript_path: str) -> tuple[int, int] | None:
+    """(input, output) tokens of the last assistant turn, from the transcript.
+
+    Input is the whole window fill: input + cache read + cache creation.
+    Reads the file tail first — usage entries sit near the end.
+    """
+    try:
+        with open(transcript_path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            f.seek(max(0, size - 512 * 1024))
+            chunk = f.read()
+    except OSError:
+        return None
+    lines = chunk.split(b"\n")
+    for line in reversed(lines):
+        line = line.strip()
+        if not line or b'"usage"' not in line:
+            continue
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        usage = (entry.get("message") or {}).get("usage")
+        if not isinstance(usage, dict) or "input_tokens" not in usage:
+            continue
+        input_total = (
+            (usage.get("input_tokens") or 0)
+            + (usage.get("cache_read_input_tokens") or 0)
+            + (usage.get("cache_creation_input_tokens") or 0)
+        )
+        return input_total, usage.get("output_tokens") or 0
+    return None
+
+
+def report_context(input_data: dict, ids: tuple[str, str, str]) -> None:
+    path = input_data.get("transcript_path")
+    if not isinstance(path, str) or not path:
+        return
+    usage = last_turn_usage(path)
+    if usage is None:
+        log("no usage entry found in transcript")
+        return
+    input_total, output = usage
+    op(
+        {
+            "v": bridge.PROTOCOL_VERSION,
+            "op": "context",
+            "agent_id": ids[0],
+            "input": input_total,
+            "output": output,
+        },
+        ids,
+    )
+
+
+def on_stop(input_data: dict, ids: tuple[str, str, str]) -> None:
+    text = input_data.get("last_assistant_message")
+    if isinstance(text, str) and text.strip():
+        op(
+            {"v": bridge.PROTOCOL_VERSION, "op": "message", "agent_id": ids[0], "text": text},
+            ids,
+        )
+    op({"v": bridge.PROTOCOL_VERSION, "op": "status", "agent_id": ids[0], "status": "idle"}, ids)
+    try:
+        report_context(input_data, ids)
+    except Exception as exc:  # context reporting is best-effort
+        log(f"context report failed: {exc.__class__.__name__}: {exc}")
+
+
+def on_session_end(ids: tuple[str, str, str]) -> None:
+    op({"v": bridge.PROTOCOL_VERSION, "op": "deregister", "agent_id": ids[0]}, ids)
+
+
+def on_permission_request(input_data: dict, ids: tuple[str, str, str]) -> None:
+    """Approval card, then wait briefly for the Telegram verdict.
+
+    The hook is the decision-maker: a verdict within the wait window resolves
+    the real permission dialog remotely; without one we exit silently and the
+    dialog shows locally as usual. A verdict that arrives after the fall-through
+    is ignored — the daemon keeps it only as an event on the backlog.
+    """
+    agent_id = ids[0]
+    tool_name = str(input_data.get("tool_name", "tool"))
+    if tool_name == "AskUserQuestion":
+        # its answer dialog is terminal-local and cannot reach Telegram; deny
+        # instantly so the model re-asks in plain text instead of hanging
+        json.dump(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PermissionRequest",
+                    "decision": {
+                        "behavior": "deny",
+                        "message": (
+                            "AskUserQuestion is disabled in this session — ask "
+                            "the user in plain text instead; their reply arrives "
+                            "as the next message."
+                        ),
+                    },
+                }
+            },
+            sys.stdout,
+        )
+        sys.stdout.write("\n")
+        log("AskUserQuestion denied — ask in plain text")
+        return
+    tool_input = input_data.get("tool_input") or {}
+    resp = op(
+        {
+            "v": bridge.PROTOCOL_VERSION,
+            "op": "approval_request",
+            "agent_id": agent_id,
+            "kind": tool_name,
+            "summary": shorten(json.dumps(tool_input, ensure_ascii=False)),
+        },
+        ids,
+    )
+    approval_id = resp.get("approval_id")
+    if not approval_id:
+        log(f"no approval_id in response: {resp}")
+        return
+    log(f"waiting {VERDICT_WAIT}s for verdict on {approval_id}")
+    cursor = 0
+    deadline = time.monotonic() + VERDICT_WAIT
+    while time.monotonic() < deadline:
+        remaining = deadline - time.monotonic()
+        try:
+            poll = bridge.call_op(
+                {
+                    "v": bridge.PROTOCOL_VERSION,
+                    "op": "events",
+                    "agent_id": agent_id,
+                    "cursor": cursor,
+                },
+                min(remaining + 2.0, bridge.EVENTS_SOCKET_TIMEOUT),
+            )
+        except bridge.TransportError:
+            break  # daemon went away — let the local dialog handle it
+        if poll.get("ok") is not True:
+            break
+        events = poll.get("events") or []
+        for event in events:
+            cursor = max(cursor, int(event.get("cursor", cursor)))
+            if event.get("type") == "approval_result" and event.get("approval_id") == approval_id:
+                behavior = "allow" if event.get("approved") else "deny"
+                decision: dict = {"behavior": behavior}
+                if behavior == "deny":
+                    decision["message"] = "Denied via Telegram approval card"
+                json.dump(
+                    {
+                        "hookSpecificOutput": {
+                            "hookEventName": "PermissionRequest",
+                            "decision": decision,
+                        }
+                    },
+                    sys.stdout,
+                )
+                sys.stdout.write("\n")
+                log(f"verdict for {approval_id}: {behavior}")
+                return
+        if not events:
+            break  # the server's long-poll window elapsed with nothing pending
+    log(f"no verdict for {approval_id} — falling through to the local dialog")
+
+
+HANDLERS = {
+    "SessionStart": on_session_start,
+    "UserPromptSubmit": on_prompt_submit,
+}
+
+
+def main() -> None:
+    try:
+        input_raw = sys.stdin.read()
+        input_data = json.loads(input_raw) if input_raw.strip() else {}
+        if not isinstance(input_data, dict):
+            return
+        event = str(input_data.get("hook_event_name", ""))
+        ids = identity(input_data)
+        if ids is None:
+            return  # not a tmux session — hooks stay out of the way
+        if event == "PermissionRequest":
+            on_permission_request(input_data, ids)
+        elif event == "Stop":
+            on_stop(input_data, ids)
+        elif event == "SessionEnd":
+            on_session_end(ids)
+        elif event in HANDLERS:
+            HANDLERS[event](ids)
+    except Exception as exc:  # never break the session
+        log(f"{exc.__class__.__name__}: {exc}")
+
+
+if __name__ == "__main__":
+    main()

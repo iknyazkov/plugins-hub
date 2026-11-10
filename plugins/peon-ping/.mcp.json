@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "peon-ping": {
+      "command": "bash",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/mcp-start.sh"]
+    }
+  }
+}

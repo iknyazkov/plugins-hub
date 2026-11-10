@@ -1,0 +1,68 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -x \"${CLAUDE_PLUGIN_ROOT}/hooks/channel-hook\" ] && \"${CLAUDE_PLUGIN_ROOT}/hooks/channel-hook\" || true",
+            "timeout": 15,
+            "async": true
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -x \"${CLAUDE_PLUGIN_ROOT}/hooks/channel-hook\" ] && \"${CLAUDE_PLUGIN_ROOT}/hooks/channel-hook\" || true",
+            "timeout": 10,
+            "async": true
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -x \"${CLAUDE_PLUGIN_ROOT}/hooks/channel-hook\" ] && \"${CLAUDE_PLUGIN_ROOT}/hooks/channel-hook\" || true",
+            "timeout": 15,
+            "async": true
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -x \"${CLAUDE_PLUGIN_ROOT}/hooks/channel-hook\" ] && \"${CLAUDE_PLUGIN_ROOT}/hooks/channel-hook\" || true",
+            "timeout": 10,
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -x \"${CLAUDE_PLUGIN_ROOT}/hooks/channel-hook\" ] && \"${CLAUDE_PLUGIN_ROOT}/hooks/channel-hook\" || true",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}
