@@ -63,7 +63,10 @@ def main() -> None:
 
 
 async def serve(cfg: Config, base: Path) -> None:
-    provider = TelegramProvider(token=cfg.token, proxy_url=cfg.proxy_url)
+    stop = asyncio.Event()
+    # a fatal from the polling watchdog must go through the same clean
+    # shutdown path as a signal: unlink the socket and pidfile on the way out
+    provider = TelegramProvider(token=cfg.token, proxy_url=cfg.proxy_url, on_fatal=stop.set)
     state = StateStore(base / "state.json")
     state.load()
     core = Core(config=cfg, registry=Registry(), state=state, provider=provider)
@@ -73,7 +76,6 @@ async def serve(cfg: Config, base: Path) -> None:
     server = JsonlServer(core, base / "server.sock")
     (base / "server.pid").write_text(str(os.getpid()))
 
-    stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         with contextlib.suppress(NotImplementedError):  # not everywhere (Windows)
