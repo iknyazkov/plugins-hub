@@ -225,6 +225,33 @@ async def test_passthrough_usage_and_dead_ends(tmp_path: Path) -> None:
 # ------------------------------------------------------------------- sessions
 
 
+async def test_sessions_new_quoted_alias(tmp_path: Path) -> None:
+    """A quoted multi-word alias counts as one token; typographic quotes too."""
+    spawned: list[tuple[str, str, str]] = []
+
+    async def fake_new(name: str, command: str, cwd: str) -> None:
+        spawned.append((name, command, cwd))
+
+    core, provider = make_core(tmp_path)
+    from channelsrv.features.sessions import Feature as SessionsFeature
+
+    SessionsFeature(new_session=fake_new).register(core)
+    reg_agent(core, "aq")
+
+    await core.on_command(42, "new", f'"my claude --resume" work {tmp_path}')
+    assert spawned == [("work", "my claude --resume", str(tmp_path))]
+    assert "Spawned" in provider.texts[-1][1]
+
+    # mobile keyboards swap straight quotes for typographic ones — same result
+    spawned.clear()
+    await core.on_command(42, "new", f"«my claude» work {tmp_path}")
+    assert spawned == [("work", "my claude", str(tmp_path))]
+
+    await core.on_command(42, "new", '"unclosed claude work /tmp')  # unbalanced quote
+    assert "Usage:" in provider.texts[-1][1]
+    assert len(spawned) == 1
+
+
 async def test_sessions_new_and_close(tmp_path: Path) -> None:
     spawned: list[tuple[str, str, str]] = []
     closed: list[str] = []
@@ -246,7 +273,7 @@ async def test_sessions_new_and_close(tmp_path: Path) -> None:
     assert "Spawned" in provider.texts[-1][1]
 
     await core.on_command(42, "new", "claude work")  # missing path
-    assert "Usage:" in provider.texts[-1][1] and "Example:" in provider.texts[-1][1]
+    assert "Usage:" in provider.texts[-1][1] and "Examples:" in provider.texts[-1][1]
     await core.on_command(42, "new", "")  # bare
     assert "Usage:" in provider.texts[-1][1]
     assert len(spawned) == 1

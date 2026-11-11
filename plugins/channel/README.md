@@ -69,7 +69,8 @@ In a tmux session the bridge deliberately stays idle — hooks own the channel.
 `/agents` — pick the active agent · `/status` — snapshot of all agents ·
 `/mode` — modes of the active agent · `/command <…>` — run a command inside
 the active agent's session · `/new <agent command> <session> <path>` — spawn
-a new tmux session in <path> (aliases resolve) · `/close <session>` — kill
+a new tmux session in <path> (aliases resolve; quote a multi-word command) ·
+`/close <session>` — kill
 one · `/cron list|add|remove|run` — scheduled agent jobs (plain-words
 scheduling: recurring cron or one-shot «через 5 минут», optional per-job
 launch alias; the daemon runs each job in a throwaway agent session and
