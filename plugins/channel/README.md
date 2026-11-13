@@ -75,7 +75,7 @@ one · `/cron list|add|remove|run` — scheduled agent jobs (plain-words
 scheduling: recurring cron or one-shot «через 5 минут», optional per-job
 launch alias; the daemon runs each job in a throwaway agent session and
 sends the reply here) · `/screen` — the active agent's visible pane, for
-identifying a stuck screen · plain text — a message to the agent.
+identifying a stuck screen · `/restart` — respawn the daemon · plain text — a message to the agent.
 
 ## Notes
 
