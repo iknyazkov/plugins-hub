@@ -20,6 +20,7 @@ from channelsrv.features.passthrough import Feature as PassthroughFeature
 from channelsrv.features.selection import Feature as SelectionFeature
 from channelsrv.features.sessions import Feature as SessionsFeature
 from channelsrv.features.status import Feature as StatusFeature
+from channelsrv.features.watchdog import Feature as WatchdogFeature
 from channelsrv.server import Core
 
 _NLCMD = NlCmdFeature()
@@ -33,6 +34,7 @@ FEATURES = (
     ContextFeature(),
     _NLCMD,
     CronFeature(convert=_NLCMD.convert),
+    WatchdogFeature(),
 )
 
 #: Advertised in the Telegram command menu (set_my_commands at startup).
@@ -46,6 +48,7 @@ MENU = (
     ("close", "close a tmux agent session"),
     ("context", "context usage of the active agent"),
     ("cron", "scheduled agent jobs (list/add/remove/run)"),
+    ("screen", "show the active agent's pane"),
 )
 
 

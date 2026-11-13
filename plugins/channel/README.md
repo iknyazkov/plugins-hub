@@ -74,10 +74,18 @@ a new tmux session in <path> (aliases resolve; quote a multi-word command) ·
 one · `/cron list|add|remove|run` — scheduled agent jobs (plain-words
 scheduling: recurring cron or one-shot «через 5 минут», optional per-job
 launch alias; the daemon runs each job in a throwaway agent session and
-sends the reply here) · plain text — a message to the agent.
+sends the reply here) · `/screen` — the active agent's visible pane, for
+identifying a stuck screen · plain text — a message to the agent.
 
 ## Notes
 
+- **Pane watchdog.** The daemon watches every registered tmux agent's pane;
+  when a screen stays unchanged for a tick (5 s) and matches a signature from
+  `channelsrv/src/channelsrv/signatures.json`, it presses the signature's keys
+  (e.g. Enter on the auto-mode classifier billing notice). Screens without a
+  matching signature are never touched — use `/screen` to inspect a stuck pane
+  and add a signature by hand. The `read-only-allow` hook pre-approves plain
+  `grep` Bash commands so they skip classifier review in gateway sessions.
 - `channelsrv/` is a vendored snapshot of the channelsrv project, translated
   to English for this hub; gates: `make lint && make test` inside `channelsrv/`.
 - macOS/Linux only (UDS + tmux). Claude Code must run inside tmux for the

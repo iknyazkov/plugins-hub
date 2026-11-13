@@ -150,3 +150,25 @@ async def pane_alive(target: str) -> bool:
     except OSError:
         return False  # tmux binary missing or not executable — panes unreachable
     return proc.returncode == 0 and bool(out.strip())
+
+
+async def capture_pane(target: str) -> str:
+    """The visible content of the ``target`` pane (screen only, no history)."""
+    proc = await asyncio.create_subprocess_exec(
+        *_base(),
+        "capture-pane",
+        "-p",
+        "-t",
+        target,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    out, _ = await proc.communicate()
+    if proc.returncode != 0:
+        raise RuntimeError(f"tmux capture-pane exited with {proc.returncode}")
+    return out.decode()
+
+
+async def send_keys(target: str, *keys: str) -> None:
+    """Sends key names (``Enter``, ``Escape``, …) to the ``target`` pane."""
+    await _run(["send-keys", "-t", target, *keys])

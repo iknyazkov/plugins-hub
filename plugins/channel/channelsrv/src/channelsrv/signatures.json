@@ -1,0 +1,7 @@
+[
+  {
+    "id": "auto-mode-classifier-billing",
+    "match": ["isn't eligible"],
+    "keys": ["Enter"]
+  }
+]
