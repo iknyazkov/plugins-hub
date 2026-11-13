@@ -1,6 +1,6 @@
 {
   "name": "channel",
-  "version": "0.1.26",
+  "version": "0.1.27",
   "description": "Telegram remote control for agent sessions: hooks + tmux paste deliver messages into the session and replies back, with a resident MCP bridge fallback; both keep the bundled channelsrv daemon alive.",
   "keywords": [
     "channel",

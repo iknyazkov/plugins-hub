@@ -82,10 +82,12 @@ identifying a stuck screen · `/restart` — respawn the daemon · plain text �
 - **Progress chain.** The daemon tails the session transcript (path reported
   at registration; the tail re-opens on any op, so a mid-turn daemon restart
   resumes streaming) and streams intermediate output to Telegram: assistant
-  text blocks and tool calls (`⚙ Bash(…)`) go into a message it edits in
-  place (~2.5 s throttle, a fresh message before Telegram's 4096-char cap).
-  Thinking blocks and tool results are excluded; the final `Stop` reply is
-  unchanged — the chain stays in the chat above it as history.
+  text blocks and italic tool-call lines (`*⚙ Bash(…)*`) go into a message
+  it edits in place (~2.5 s throttle, a fresh message before Telegram's
+  4096-char cap). Thinking blocks and tool results are excluded; the final
+  `Stop` reply arrives as usual — unless the chain already shows it
+  verbatim, then the duplicate is skipped — with the chain staying in the
+  chat above it as history.
 - **Pane watchdog.** The daemon watches every registered tmux agent's pane;
   when a screen stays unchanged for a tick (5 s) and matches a signature from
   `channelsrv/src/channelsrv/signatures.json`, it presses the signature's keys
