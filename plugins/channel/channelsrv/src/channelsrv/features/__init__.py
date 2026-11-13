@@ -17,6 +17,7 @@ from channelsrv.features.cron import Feature as CronFeature
 from channelsrv.features.modes import Feature as ModesFeature
 from channelsrv.features.nlcmd import Feature as NlCmdFeature
 from channelsrv.features.passthrough import Feature as PassthroughFeature
+from channelsrv.features.restart import Feature as RestartFeature
 from channelsrv.features.selection import Feature as SelectionFeature
 from channelsrv.features.sessions import Feature as SessionsFeature
 from channelsrv.features.status import Feature as StatusFeature
@@ -35,6 +36,7 @@ FEATURES = (
     _NLCMD,
     CronFeature(convert=_NLCMD.convert),
     WatchdogFeature(),
+    RestartFeature(),
 )
 
 #: Advertised in the Telegram command menu (set_my_commands at startup).
@@ -49,6 +51,7 @@ MENU = (
     ("context", "context usage of the active agent"),
     ("cron", "scheduled agent jobs (list/add/remove/run)"),
     ("screen", "show the active agent's pane"),
+    ("restart", "restart the daemon"),
 )
 
 
