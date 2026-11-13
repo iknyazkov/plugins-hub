@@ -43,7 +43,8 @@ def tool_line(name: str, tool_input: object) -> str:
     detail = " ".join(detail.split())
     if len(detail) > TOOL_LINE_LIMIT:
         detail = detail[: TOOL_LINE_LIMIT - 1] + "…"
-    return f"⚙ {name}({detail})" if detail else f"⚙ {name}"
+    # italics set the line apart from the assistant's prose around it
+    return f"*⚙ {name}({detail})*" if detail else f"*⚙ {name}*"
 
 
 def extract_chunks(entry: object) -> list[str]:
@@ -76,13 +77,13 @@ class Chain:
         self.text = ""  # the live segment's text (not yet rolled over)
 
     def add(self, chunk: str) -> list[str]:
-        """Appends a chunk; returns segments closed by this chunk, if any."""
+        """Appends a chunk as its own paragraph; returns segments closed by this chunk."""
         closed: list[str] = []
         for piece in _pieces(chunk):
             if not self.text:
                 self.text = piece
-            elif len(self.text) + 1 + len(piece) <= SEGMENT_LIMIT:
-                self.text += "\n" + piece
+            elif len(self.text) + 2 + len(piece) <= SEGMENT_LIMIT:
+                self.text += "\n\n" + piece
             else:
                 closed.append(self.text)
                 self.text = piece

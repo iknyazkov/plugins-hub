@@ -38,25 +38,25 @@ class TestExtractChunks:
         entry = assistant_entry(
             {"type": "tool_use", "name": "Agent", "input": {"description": "Research limits"}}
         )
-        assert progress.extract_chunks(entry) == ["⚙ Agent(Research limits)"]
+        assert progress.extract_chunks(entry) == ["*⚙ Agent(Research limits)*"]
 
 
 class TestToolLine:
     def test_prefers_description_over_other_keys(self) -> None:
         line = progress.tool_line("Bash", {"command": "git status", "description": "Check tree"})
-        assert line == "⚙ Bash(Check tree)"
+        assert line == "*⚙ Bash(Check tree)*"
 
     def test_falls_back_to_command_then_any_string(self) -> None:
-        assert progress.tool_line("Bash", {"command": "git status"}) == "⚙ Bash(git status)"
-        assert progress.tool_line("Read", {"other": "note"}) == "⚙ Read(note)"
+        assert progress.tool_line("Bash", {"command": "git status"}) == "*⚙ Bash(git status)*"
+        assert progress.tool_line("Read", {"other": "note"}) == "*⚙ Read(note)*"
 
     def test_newlines_are_collapsed_and_long_input_truncated(self) -> None:
         line = progress.tool_line("Bash", {"command": "a\nb\n" + "x" * 200})
         assert "\n" not in line
-        assert len(line) <= progress.TOOL_LINE_LIMIT + len("⚙ Bash()")
+        assert len(line) <= progress.TOOL_LINE_LIMIT + len("*⚙ Bash()*")
 
     def test_empty_input_names_the_tool_only(self) -> None:
-        assert progress.tool_line("Skill", {}) == "⚙ Skill"
+        assert progress.tool_line("Skill", {}) == "*⚙ Skill*"
 
 
 class TestChain:
@@ -64,7 +64,7 @@ class TestChain:
         chain = progress.Chain()
         chain.add("one")
         chain.add("two")
-        assert chain.text == "one\ntwo"
+        assert chain.text == "one\n\ntwo"
 
     def test_rolls_over_when_segment_overflows(self) -> None:
         chain = progress.Chain()
@@ -162,7 +162,7 @@ async def test_progress_edits_are_throttled(world: tuple[Core, FakeProvider, Pat
     assert agent is not None and agent.tail is not None
     agent.tail.last_touch -= progress.PROGRESS_THROTTLE + 0.1
     await core.progress_once()
-    assert provider.edits == [(42, 1001, "first\nsecond")]
+    assert provider.edits == [(42, 1001, "first\n\nsecond")]
 
 
 async def test_idle_closes_the_turn_with_a_flush(world: tuple[Core, FakeProvider, Path]) -> None:
@@ -180,7 +180,7 @@ async def test_idle_flush_edits_the_live_message(world: tuple[Core, FakeProvider
     await core.progress_once()
     write_entry(transcript, assistant_entry({"type": "text", "text": "second"}))
     await idle(core)  # unthrottled flush of the live message
-    assert provider.edits == [(42, 1001, "first\nsecond")]
+    assert provider.edits == [(42, 1001, "first\n\nsecond")]
     agent = core.registry.get("a1")
     assert agent is not None and agent.tail is None
 

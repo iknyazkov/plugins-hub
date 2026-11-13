@@ -88,8 +88,8 @@ for up to 30 minutes, so a long turn keeps showing «печатает…».
 is also streamed: the daemon tails the transcript (append-only, one JSONL
 entry per completed block; the tail opens at registration — and re-opens on
 any op, surviving a mid-turn daemon restart — and closes on a turn-end
-status), turns assistant `text` blocks and `tool_use` calls (`⚙ Bash(…)`,
-truncated) into a Telegram message it edits in place (2.5s throttle between
+status), turns assistant `text` blocks and `tool_use` calls — italic
+`*⚙ Bash(…)*` lines, truncated — into a Telegram message it edits in place (2.5s throttle between
 edits, a fresh message before Telegram's 4096-char cap). `thinking` blocks
 and tool results never reach the chat; the final `Stop` reply arrives as
 usual — unless the chain already shows it verbatim, then the duplicate is
