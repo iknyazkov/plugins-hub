@@ -15,7 +15,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from channelsrv import protocol
+from channelsrv import progress, protocol
 
 #: How many events per agent we keep — only the nearest retrospective is needed.
 BACKLOG_LIMIT = 256
@@ -32,6 +32,10 @@ class Agent:
     detail: str | None = None
     mode: str | None = None
     thinking_since: float | None = None  # the typing indicator renews while set
+    #: transcript JSONL path (reported at registration) — the progress tail reads it
+    transcript_path: str | None = None
+    #: live-turn transcript tail; None between turns
+    tail: progress.TurnTail | None = None
     #: last known context usage {"input": int, "output": int}, reported by the Stop hook
     context: dict[str, int] | None = None
     #: service agents (e.g. the NL-command converter) are captured, never broadcast
@@ -74,6 +78,7 @@ class Registry:
         session_name: str,
         modes: Sequence[str],
         tmux_target: str | None = None,
+        transcript_path: str | None = None,
         service: bool = False,
     ) -> Agent:
         agent = Agent(
@@ -82,6 +87,7 @@ class Registry:
             session_name=session_name,
             modes=tuple(modes),
             tmux_target=tmux_target,
+            transcript_path=transcript_path,
             service=service,
             last_seen=self._clock(),
         )

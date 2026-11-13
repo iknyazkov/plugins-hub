@@ -41,6 +41,9 @@ STATUSES = frozenset(
 )
 #: What a bridge may report about itself: offline is the server's verdict.
 AGENT_STATUSES = STATUSES - {STATUS_OFFLINE}
+#: Statuses that mean the turn itself is over — the progress tail closes on these.
+#: waiting_* mid-turn states keep the tail: the turn continues after the wait.
+TURN_END_STATUSES = frozenset({STATUS_IDLE, STATUS_DONE, STATUS_ERROR})
 
 EVENT_USER_MESSAGE = "user_message"
 EVENT_APPROVAL_RESULT = "approval_result"

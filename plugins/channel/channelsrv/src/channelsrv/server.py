@@ -17,7 +17,7 @@ from collections.abc import Awaitable, Callable, Coroutine, Mapping
 from pathlib import Path
 from typing import Any
 
-from channelsrv import delivery, protocol
+from channelsrv import delivery, progress, protocol
 from channelsrv.config import Config
 from channelsrv.providers.base import Provider
 from channelsrv.registry import Agent, Registry
@@ -105,6 +105,7 @@ class Core:
             session_name=protocol.req_str(request, "session_name"),
             modes=modes_raw,
             tmux_target=protocol.opt_str(request, "tmux_target"),
+            transcript_path=protocol.opt_str(request, "transcript_path"),
         )
         log.info(
             "agent registered: %s (%s), modes=%s, tmux=%s",
@@ -140,7 +141,75 @@ class Core:
                     await self.provider.chat_action(chat_id)
                 except Exception:  # the indicator is cosmetic, never fatal
                     log.debug("chat action failed", exc_info=True)
+        if status == protocol.STATUS_THINKING:
+            self._start_tail(agent)
+        elif status in protocol.TURN_END_STATUSES and agent.tail is not None:
+            await self.close_turn(agent)
         return protocol.ok()
+
+    def _start_tail(self, agent: Agent) -> None:
+        """Opens the turn's transcript tail at the current end of the file."""
+        if agent.tail is not None or agent.transcript_path is None:
+            return
+        try:
+            offset = os.path.getsize(agent.transcript_path)
+        except OSError:
+            offset = 0
+        agent.tail = progress.TurnTail(path=agent.transcript_path, offset=offset)
+
+    async def close_turn(self, agent: Agent) -> None:
+        """Drains the tail one last time, flushes the chain, drops the tail."""
+        tail, agent.tail = agent.tail, None
+        if tail is not None:
+            progress.drain_chunks(tail)  # the close flush skips the throttle
+            await self._write_progress(agent, tail)
+
+    async def progress_once(self) -> None:
+        """One tail pass: new transcript chunks into the Telegram progress chain."""
+        now = time.monotonic()
+        for agent in self.registry.snapshot():
+            tail = agent.tail
+            if tail is None or agent.status != protocol.STATUS_THINKING:
+                continue
+            progress.drain_chunks(tail)
+            if now - tail.last_touch < progress.PROGRESS_THROTTLE:
+                continue
+            await self._write_progress(agent, tail)
+
+    async def _write_progress(self, agent: Agent, tail: progress.TurnTail) -> None:
+        chats = self._agent_chats(agent.id)
+        try:
+            for segment in tail.pending:  # closed before ever shown — send as-is
+                for chat_id in chats:
+                    await self.provider.send_card(chat_id, segment, [])
+            tail.pending.clear()
+        except Exception:  # progress is cosmetic, never fatal
+            log.debug("progress write failed", exc_info=True)
+            return
+        text = tail.chain.text
+        if not text or text == tail.sent_text:
+            return
+        for chat_id in chats:
+            try:
+                message_id = tail.messages.get(chat_id)
+                if message_id is None:
+                    message_id = await self.provider.send_card(chat_id, text, [])
+                    if message_id is not None:
+                        tail.messages[chat_id] = message_id
+                else:
+                    await self.provider.edit_text(chat_id, message_id, text)
+            except Exception:  # progress is cosmetic, never fatal
+                log.debug("progress write failed", exc_info=True)
+        tail.sent_text = text
+        tail.last_touch = time.monotonic()
+
+    async def progress_forever(self) -> None:
+        while True:
+            await asyncio.sleep(progress.PROGRESS_INTERVAL)
+            try:
+                await self.progress_once()
+            except Exception:
+                log.exception("progress tick failed")
 
     async def _op_message(self, request: Mapping[str, Any]) -> dict[str, Any]:
         agent = self.live_agent(request)
@@ -327,6 +396,7 @@ class JsonlServer:
         self._sock_path = sock_path
         self._server: asyncio.AbstractServer | None = None
         self._sweeper: asyncio.Task[None] | None = None
+        self._progress: asyncio.Task[None] | None = None
 
     async def serve(self) -> None:
         self._sock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -337,19 +407,22 @@ class JsonlServer:
         )
         os.chmod(self._sock_path, 0o600)
         self._sweeper = asyncio.create_task(self._core.sweep_forever())
+        self._progress = asyncio.create_task(self._core.progress_forever())
         log.info("listening on %s", self._sock_path)
         try:
             async with self._server:
                 await self._server.serve_forever()
         finally:
-            if self._sweeper is not None:
-                self._sweeper.cancel()
+            for task in (self._sweeper, self._progress):
+                if task is not None:
+                    task.cancel()
 
     async def stop(self) -> None:
         if self._server is not None:
             self._server.close()
-        if self._sweeper is not None:
-            self._sweeper.cancel()
+        for task in (self._sweeper, self._progress):
+            if task is not None:
+                task.cancel()
 
     async def _handle_conn(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:
