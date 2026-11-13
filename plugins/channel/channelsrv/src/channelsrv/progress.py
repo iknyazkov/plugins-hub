@@ -133,6 +133,20 @@ def drain_chunks(tail: TurnTail) -> None:
         tail.sent_text = ""
 
 
+def chain_covers(tail: TurnTail, final_text: str) -> bool:
+    """True when the chain already shows the final reply verbatim.
+
+    The Stop hook re-sends ``last_assistant_message``, which the chain has
+    usually streamed a moment earlier — the caller drains the tail first, so
+    a verbatim match means the second copy would be pure duplication.
+    """
+    text = final_text.strip()
+    if not text or tail.pending:  # unsent segments exist — the chain shows less than was made
+        return False
+    chain = tail.chain.text.rstrip()
+    return chain == text or chain.endswith(text)
+
+
 def read_new_chunks(tail: TurnTail) -> list[str]:
     """Drains the transcript tail; survives a missing or truncated file."""
     try:

@@ -222,6 +222,11 @@ class Core:
     async def _op_message(self, request: Mapping[str, Any]) -> dict[str, Any]:
         agent = self.live_agent(request)
         text = protocol.req_str(request, "text")
+        if agent.tail is not None:
+            progress.drain_chunks(agent.tail)
+            if progress.chain_covers(agent.tail, text):
+                log.info("progress: final already streamed — duplicate skipped")
+                return protocol.ok()
         await self.deliver_from_agent(agent.id, text)
         return protocol.ok()
 

@@ -198,3 +198,38 @@ async def test_rollover_abandons_the_old_message(world: tuple[Core, FakeProvider
     assert len(provider.cards) == 2
     assert provider.cards[1] == (42, "b" * progress.SEGMENT_LIMIT, ())
     assert provider.edits == []
+
+
+# ------------------------------------------------------- final-duplicate skip
+
+
+async def test_chain_covers_the_streamed_final() -> None:
+    tail = progress.TurnTail(path="/dev/null")
+    tail.chain.add("first note")
+    tail.chain.add("final answer text")
+    assert progress.chain_covers(tail, "final answer text")
+    assert not progress.chain_covers(tail, "different final")
+    assert not progress.chain_covers(tail, "  ")  # blank finals are never "covered"
+
+
+async def test_final_already_streamed_is_not_sent_again(
+    world: tuple[Core, FakeProvider, Path],
+) -> None:
+    core, provider, transcript = world
+    final = "Итог: всё готово."
+    write_entry(transcript, assistant_entry({"type": "text", "text": final}))
+    resp = await core.handle({"v": 1, "op": "message", "agent_id": "a1", "text": final})
+    assert resp == {"ok": True}
+    assert provider.texts == []  # the chain already shows it verbatim
+    await idle(core)
+    agent = core.registry.get("a1")
+    assert agent is not None and agent.tail is None
+
+
+async def test_unseen_final_is_delivered(world: tuple[Core, FakeProvider, Path]) -> None:
+    core, provider, _ = world
+    resp = await core.handle(
+        {"v": 1, "op": "message", "agent_id": "a1", "text": "Финал, которого нет в цепочке"}
+    )
+    assert resp == {"ok": True}
+    assert provider.texts == [(42, "Финал, которого нет в цепочке", "agent")]
