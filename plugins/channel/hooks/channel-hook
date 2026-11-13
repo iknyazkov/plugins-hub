@@ -30,6 +30,9 @@ import channel_mcp as bridge  # noqa: E402
 
 VERDICT_WAIT = float(os.environ.get("CHANNEL_HOOK_VERDICT_WAIT", "20"))
 SUMMARY_LIMIT = 300
+#: this run's transcript path (every hook event carries it); the daemon tails
+#: it while the turn is live to stream intermediate output to Telegram
+TRANSCRIPT_PATH: str | None = None
 
 
 def log(message: str) -> None:
@@ -80,6 +83,7 @@ def register(agent_id: str, name: str, cwd: str) -> None:
             "session_name": os.environ.get("CHANNEL_SESSION_NAME") or cwd,
             "modes": [],
             "tmux_target": os.environ["TMUX_PANE"],
+            "transcript_path": TRANSCRIPT_PATH,
         },
         bridge.OP_TIMEOUT,
     )
@@ -294,6 +298,10 @@ def main() -> None:
         if not isinstance(input_data, dict):
             return
         event = str(input_data.get("hook_event_name", ""))
+        path = input_data.get("transcript_path")
+        if isinstance(path, str) and path:
+            global TRANSCRIPT_PATH  # noqa: F824 — set per hook run, before register
+            TRANSCRIPT_PATH = path
         ids = identity(input_data)
         if ids is None:
             return  # not a tmux session — hooks stay out of the way
