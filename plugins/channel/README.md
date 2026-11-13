@@ -36,8 +36,8 @@ spawn `uv run channelsrv` under a flock → poll healthz). Then:
 
 | Hook | Effect |
 | --- | --- |
-| `SessionStart` | register with the daemon, `tmux_target = $TMUX_PANE` |
-| `UserPromptSubmit` | status `thinking` (typing indicator in Telegram) |
+| `SessionStart` | register with the daemon, `tmux_target = $TMUX_PANE`, `transcript_path` (the daemon tails it for the progress chain) |
+| `UserPromptSubmit` | status `thinking` (typing indicator in Telegram; the transcript tail starts here) |
 | `Stop` | `last_assistant_message` → Telegram, status `idle`, context usage → daemon (from `transcript_path`) |
 | `PermissionRequest` | approval card, then wait `CHANNEL_HOOK_VERDICT_WAIT` seconds (default 20) for a Telegram verdict — a ✅/❌ answer resolves the real permission dialog remotely; without one the dialog shows locally as usual. `AskUserQuestion` is denied instantly — its answer dialog is terminal-local; ask in plain text |
 | `SessionEnd` | deregister |
@@ -79,6 +79,13 @@ identifying a stuck screen · plain text — a message to the agent.
 
 ## Notes
 
+- **Progress chain.** While a turn runs, the daemon tails the session
+  transcript (path reported at registration) and streams intermediate output
+  to Telegram: assistant text blocks and tool calls (`⚙ Bash(…)`) go into a
+  message it edits in place (~2.5 s throttle, a fresh message before
+  Telegram's 4096-char cap). Thinking blocks and tool results are excluded;
+  the final `Stop` reply is unchanged — the chain stays in the chat above it
+  as history.
 - **Pane watchdog.** The daemon watches every registered tmux agent's pane;
   when a screen stays unchanged for a tick (5 s) and matches a signature from
   `channelsrv/src/channelsrv/signatures.json`, it presses the signature's keys

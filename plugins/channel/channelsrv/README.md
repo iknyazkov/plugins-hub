@@ -56,7 +56,7 @@ echo '{"v":1,"op":"healthz"}' | socat - UNIX-CONNECT:~/.config/channelsrv/server
 | op | fields | what it does |
 |---|---|---|
 | `healthz` | — | alive? (300ms budget; if hung, the bridge kills by `server.pid` and restarts under a flock) |
-| `register` | `agent_id, name, session_name, modes[]`, `tmux_target?` | registration (re-registration replaces); `tmux_target` = the agent's tmux pane |
+| `register` | `agent_id, name, session_name, modes[]`, `tmux_target?`, `transcript_path?` | registration (re-registration replaces); `tmux_target` = the agent's tmux pane; `transcript_path` = the session transcript JSONL the daemon tails for the progress chain |
 | `deregister` | `agent_id` | leaving |
 | `status` | `agent_id, status, detail?, mode?` | status: `idle/thinking/waiting_user/waiting_approval/done/error` (+`mode` — the current mode) |
 | `message` | `agent_id, text` | the agent's reply to the chat (tagged with its name) |
@@ -81,7 +81,17 @@ an MCP server) keeping `events` open; liveness = a live connection, silence
 - text — a message to the active agent; approvals arrive as cards with buttons
 
 While an agent is `thinking`, the daemon renews the typing indicator every 5s
-for up to 30 minutes, so a long turn keeps showing «печатает…». Agents marked
+for up to 30 minutes, so a long turn keeps showing «печатает…».
+
+**Progress chain.** For agents registered with a `transcript_path`, the turn
+is also streamed: the daemon tails the transcript (append-only, one JSONL
+entry per completed block), turns assistant `text` blocks and `tool_use`
+calls (`⚙ Bash(…)`, truncated) into a Telegram message it edits in place
+(2.5s throttle between edits, a fresh message before Telegram's 4096-char
+cap). `thinking` blocks and tool results never reach the chat; the final
+`Stop` reply arrives as usual, with the chain staying above it as history.
+
+Agents marked
 `service` (spawned by daemon features, e.g. NL-command conversion) have their
 replies captured as events instead of broadcasting, and are excluded from
 agent auto-selection.
