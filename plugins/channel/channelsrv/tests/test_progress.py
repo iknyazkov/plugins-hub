@@ -117,18 +117,19 @@ async def idle(core: Core, agent_id: str = "a1") -> None:
     await core.handle({"v": 1, "op": "status", "agent_id": agent_id, "status": "idle"})
 
 
-async def test_turn_tail_starts_on_thinking(world: tuple[Core, FakeProvider, Path]) -> None:
+async def test_turn_tail_opens_at_register(world: tuple[Core, FakeProvider, Path]) -> None:
     core, _, transcript = world
-    await think(core)
     agent = core.registry.get("a1")
     assert agent is not None and agent.tail is not None
     assert agent.tail.path == str(transcript)
     assert agent.tail.offset == 0
+    tail = agent.tail
+    await think(core)  # a thinking op must not reset a live tail
+    assert agent.tail is tail
 
 
 async def test_progress_sends_first_segment_as_card(world: tuple[Core, FakeProvider, Path]) -> None:
     core, provider, transcript = world
-    await think(core)
     write_entry(transcript, assistant_entry({"type": "text", "text": "Понял задачу."}))
     await core.progress_once()
     assert len(provider.cards) == 1
@@ -139,9 +140,19 @@ async def test_progress_sends_first_segment_as_card(world: tuple[Core, FakeProvi
     assert agent.tail.messages == {42: provider.cards and 1001}
 
 
+async def test_progress_drains_without_thinking_status(
+    world: tuple[Core, FakeProvider, Path],
+) -> None:
+    """Self-heal: after a mid-turn daemon restart the agent re-registers as
+    idle — the tail must still stream the rest of the turn."""
+    core, provider, transcript = world
+    write_entry(transcript, assistant_entry({"type": "text", "text": "after restart"}))
+    await core.progress_once()  # no thinking op was ever sent
+    assert provider.cards == [(42, "after restart", ())]
+
+
 async def test_progress_edits_are_throttled(world: tuple[Core, FakeProvider, Path]) -> None:
     core, provider, transcript = world
-    await think(core)
     write_entry(transcript, assistant_entry({"type": "text", "text": "first"}))
     await core.progress_once()
     write_entry(transcript, assistant_entry({"type": "text", "text": "second"}))
@@ -156,7 +167,6 @@ async def test_progress_edits_are_throttled(world: tuple[Core, FakeProvider, Pat
 
 async def test_idle_closes_the_turn_with_a_flush(world: tuple[Core, FakeProvider, Path]) -> None:
     core, provider, transcript = world
-    await think(core)
     write_entry(transcript, assistant_entry({"type": "text", "text": "mid-turn note"}))
     await idle(core)  # flush happens on close, no throttle — first write is a card
     assert provider.cards == [(42, "mid-turn note", ())]
@@ -166,7 +176,6 @@ async def test_idle_closes_the_turn_with_a_flush(world: tuple[Core, FakeProvider
 
 async def test_idle_flush_edits_the_live_message(world: tuple[Core, FakeProvider, Path]) -> None:
     core, provider, transcript = world
-    await think(core)
     write_entry(transcript, assistant_entry({"type": "text", "text": "first"}))
     await core.progress_once()
     write_entry(transcript, assistant_entry({"type": "text", "text": "second"}))
@@ -178,7 +187,6 @@ async def test_idle_flush_edits_the_live_message(world: tuple[Core, FakeProvider
 
 async def test_rollover_abandons_the_old_message(world: tuple[Core, FakeProvider, Path]) -> None:
     core, provider, transcript = world
-    await think(core)
     write_entry(transcript, assistant_entry({"type": "text", "text": "a" * 30}))
     await core.progress_once()
     write_entry(transcript, assistant_entry({"type": "text", "text": "b" * progress.SEGMENT_LIMIT}))

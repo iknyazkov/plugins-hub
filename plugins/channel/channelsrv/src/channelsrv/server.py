@@ -108,9 +108,11 @@ class Core:
             transcript_path=protocol.opt_str(request, "transcript_path"),
         )
         log.info(
-            "agent registered: %s (%s), modes=%s, tmux=%s",
+            "agent registered: %s (%s), modes=%s, tmux=%s, transcript=%s",
             agent.id, agent.name, agent.modes, agent.tmux_target,
+            "yes" if agent.transcript_path else "no",
         )
+        self._start_tail(agent)  # a mid-turn re-registration must resume streaming
         return protocol.ok()
 
     async def _op_deregister(self, request: Mapping[str, Any]) -> dict[str, Any]:
@@ -165,11 +167,16 @@ class Core:
             await self._write_progress(agent, tail)
 
     async def progress_once(self) -> None:
-        """One tail pass: new transcript chunks into the Telegram progress chain."""
+        """One tail pass: new transcript chunks into the Telegram progress chain.
+
+        The tail's lifetime is the turn (opened at registration, closed by a
+        turn-end status), not the thinking flag — a mid-turn daemon restart
+        re-registers the agent as idle, and the rest of the turn still streams.
+        """
         now = time.monotonic()
         for agent in self.registry.snapshot():
             tail = agent.tail
-            if tail is None or agent.status != protocol.STATUS_THINKING:
+            if tail is None:
                 continue
             progress.drain_chunks(tail)
             if now - tail.last_touch < progress.PROGRESS_THROTTLE:
@@ -183,8 +190,8 @@ class Core:
                 for chat_id in chats:
                     await self.provider.send_card(chat_id, segment, [])
             tail.pending.clear()
-        except Exception:  # progress is cosmetic, never fatal
-            log.debug("progress write failed", exc_info=True)
+        except Exception as exc:  # progress is cosmetic, never fatal — but visible
+            log.warning("progress pending write failed: %s: %s", exc.__class__.__name__, exc, exc_info=True)
             return
         text = tail.chain.text
         if not text or text == tail.sent_text:
@@ -198,10 +205,11 @@ class Core:
                         tail.messages[chat_id] = message_id
                 else:
                     await self.provider.edit_text(chat_id, message_id, text)
-            except Exception:  # progress is cosmetic, never fatal
-                log.debug("progress write failed", exc_info=True)
+            except Exception as exc:  # progress is cosmetic, never fatal — but visible
+                log.warning("progress write failed: %s: %s", exc.__class__.__name__, exc, exc_info=True)
         tail.sent_text = text
         tail.last_touch = time.monotonic()
+        log.info("progress: %d chars -> %d chat(s)", len(text), len(chats))
 
     async def progress_forever(self) -> None:
         while True:
@@ -259,6 +267,7 @@ class Core:
         if agent is None:
             raise protocol.ProtocolError(f"agent {agent_id!r} is not registered")
         self.registry.touch(agent.id)
+        self._start_tail(agent)  # self-heal: any op re-opens a lost tail
         return agent
 
     # -------------------------------------------------------- messenger side
