@@ -92,7 +92,8 @@ status), turns assistant `text` blocks and `tool_use` calls (`⚙ Bash(…)`,
 truncated) into a Telegram message it edits in place (2.5s throttle between
 edits, a fresh message before Telegram's 4096-char cap). `thinking` blocks
 and tool results never reach the chat; the final `Stop` reply arrives as
-usual, with the chain staying above it as history.
+usual — unless the chain already shows it verbatim, then the duplicate is
+skipped — with the chain staying above it as history.
 
 Agents marked
 `service` (spawned by daemon features, e.g. NL-command conversion) have their
