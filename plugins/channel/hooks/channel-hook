@@ -96,9 +96,9 @@ def register(agent_id: str, name: str, cwd: str) -> None:
 
 def op(payload: dict, ids: tuple[str, str, str], retry: bool = True) -> dict:
     """One daemon op; on 'not registered' (daemon restarted mid-session) re-register once."""
-    # KNOWN-ISSUE 1 (wiki/KNOWN_ISSUES.md): this retry only fires when the
-    # pane runs a hook — after a daemon restart an idle pane stays invisible
-    # to Telegram until something happens inside it.
+    # Backstop only: the daemon re-attaches idle panes itself at startup
+    # (adopt_agents in server.py). This retry covers a daemon that came up
+    # between this pane's last hook event and now.
     agent_id, name, cwd = ids
     try:
         resp = bridge.call_op(payload, bridge.OP_TIMEOUT)

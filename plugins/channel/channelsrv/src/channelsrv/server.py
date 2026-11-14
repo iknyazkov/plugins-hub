@@ -50,6 +50,7 @@ class Core:
         events_timeout: float = 25.0,
         deliver: Callable[[str, str], Coroutine[Any, Any, None]] | None = None,
         pane_alive: Callable[[str], Coroutine[Any, Any, bool]] | None = None,
+        list_panes: Callable[[], Coroutine[Any, Any, list[dict[str, str]]]] | None = None,
     ) -> None:
         self.config = config
         self.registry = registry
@@ -62,6 +63,10 @@ class Core:
         #: how the sweeper checks a tmux agent is still there (tests inject fakes)
         self.pane_alive: Callable[[str], Coroutine[Any, Any, bool]] = (
             pane_alive or delivery.pane_alive
+        )
+        #: how startup adoption scans the panes (tests inject fakes)
+        self.list_panes: Callable[[], Coroutine[Any, Any, list[dict[str, str]]]] = (
+            list_panes or delivery.list_panes
         )
         self._events_timeout = events_timeout
         self._ops: dict[str, OpHandler] = {
@@ -112,12 +117,15 @@ class Core:
             agent.id, agent.name, agent.modes, agent.tmux_target,
             "yes" if agent.transcript_path else "no",
         )
+        if agent.transcript_path:  # data for a post-restart re-attach to resume streaming
+            self.state.set_transcript(agent.id, agent.transcript_path)
         self._start_tail(agent)  # a mid-turn re-registration must resume streaming
         return protocol.ok()
 
     async def _op_deregister(self, request: Mapping[str, Any]) -> dict[str, Any]:
         agent_id = protocol.req_str(request, "agent_id")
         self.registry.deregister(agent_id)
+        self.state.drop_transcript(agent_id)  # the session ended; the path is dead
         log.info("agent gone: %s", agent_id)
         return protocol.ok()
 
@@ -304,11 +312,9 @@ class Core:
                 return agent
             if agent is not None:
                 return None  # the pick exists but died — make the user choose again
-            # a missing pick is a stale pin (the registry lives in memory and a
-            # daemon restart wipes it) — fall through to auto-selection;
-            # KNOWN-ISSUE 1 (wiki/KNOWN_ISSUES.md): right after a restart the
-            # registry is empty, every message lands in the select hint, and
-            # nothing pulls the panes back in
+            # a missing pick is a stale pin — fall through to auto-selection;
+            # a restart no longer leaves the registry empty (adopt_agents runs
+            # at startup), so a stale pin means the pane itself is gone
         agents = [a for a in self.registry.snapshot() if not a.service]
         if len(agents) == 1:  # the only agent — auto-selected without questions
             return agents[0]
@@ -329,6 +335,50 @@ class Core:
                 await handler(chat_id, data[len(prefix) :])
                 return
         log.warning("callback without handler: %r", data)
+
+    # ------------------------------------------------------- restart adoption
+
+    async def adopt_agents(self) -> list[Agent]:
+        """Re-registers agents for tmux panes running claude after a restart.
+
+        A restart wipes the in-memory registry, and an idle pane fires no hook
+        to re-register itself — so the daemon pulls instead: panes running
+        claude are exactly the sessions a SessionStart hook would register,
+        and the hook's identity formula reproduces their ids deterministically.
+        Liveness is the pane scan itself — no persisted liveness anywhere.
+        """
+        adopted: list[Agent] = []
+        for pane in await self.list_panes():
+            if pane["command"] != "claude":
+                continue
+            agent_id = delivery.agent_id_for(pane["path"], pane["id"])
+            agent = self.registry.register(
+                agent_id=agent_id,
+                name=delivery.agent_name_for(pane["session"] or None, pane["path"], pane["id"]),
+                session_name=pane["path"],
+                modes=[],
+                tmux_target=pane["id"],
+                transcript_path=self.state.transcript(agent_id),
+            )
+            self._start_tail(agent)
+            adopted.append(agent)
+        if adopted:
+            self.state.prune_transcripts({a.id for a in adopted})
+        if adopted:
+            log.info("adopted %d agent(s) from tmux panes", len(adopted))
+        return adopted
+
+    async def announce_adopted(self, adopted: list[Agent]) -> None:
+        """One line in the chats whose pinned agent came back: downtime stops being silent."""
+        if not adopted:
+            return
+        text = f"daemon restarted: {len(adopted)} agent(s) re-attached"
+        chats = {c for a in adopted for c in self.state.chats_for_agent(a.id)}
+        for chat_id in chats:
+            try:
+                await self.provider.send_text(chat_id, text)
+            except Exception:  # the notice is cosmetic, never fatal
+                log.warning("restart notice to chat %s failed", chat_id, exc_info=True)
 
     # ---------------------------------------------------------------- helpers
 

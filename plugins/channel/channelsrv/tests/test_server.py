@@ -29,6 +29,7 @@ def make_core(
     provider: FakeProvider | None = None,
     deliver: Callable[[str, str], Coroutine[Any, Any, None]] | None = None,
     pane_alive: Callable[[str], Coroutine[Any, Any, bool]] | None = None,
+    list_panes: Callable[[], Coroutine[Any, Any, list[dict[str, str]]]] | None = None,
 ) -> Core:
     provider = provider or FakeProvider()
     state = StateStore(tmp_path / "state.json")
@@ -41,6 +42,7 @@ def make_core(
         events_timeout=0.2,
         deliver=deliver,
         pane_alive=pane_alive,
+        list_panes=list_panes,
     )
 
 
@@ -368,3 +370,93 @@ async def test_allowed_ids_gate() -> None:
     )
     assert core.is_allowed(10) is True
     assert core.is_allowed(11) is False
+
+
+# ------------------------------------------------------------- restart adoption
+
+def make_panes(*specs: tuple[str, str, str, str]) -> list[dict[str, str]]:
+    return [
+        {"id": i, "command": c, "path": p, "session": s} for i, c, p, s in specs
+    ]
+
+
+async def test_adopt_registers_claude_panes_only(tmp_path: Path) -> None:
+    panes = make_panes(
+        ("%1", "claude", "/Users/x/plugins-hub", "channel"),
+        ("%0", "rbi", "/Users/x", "system"),
+        ("%14", "claude", "/Users/x/plugins-hub", "growth"),
+    )
+    core = make_core(tmp_path, list_panes=lambda: asyncio.sleep(0, result=panes))
+    adopted = await core.adopt_agents()
+    assert sorted(a.id for a in adopted) == ["claude-plugins-hub-%1", "claude-plugins-hub-%14"]
+    by_id = {a.id: a for a in adopted}
+    assert by_id["claude-plugins-hub-%1"].tmux_target == "%1"
+    assert by_id["claude-plugins-hub-%1"].name == "channel-plugins-hub-1"
+    assert by_id["claude-plugins-hub-%1"].session_name == "/Users/x/plugins-hub"
+
+
+async def test_adopt_uses_persisted_transcript_and_opens_tail(tmp_path: Path) -> None:
+    transcript = tmp_path / "t.jsonl"
+    transcript.write_text("{}\n")
+    panes = make_panes(("%1", "claude", "/Users/x/proj", "s"))
+    core = make_core(tmp_path, list_panes=lambda: asyncio.sleep(0, result=panes))
+    core.state.set_transcript("claude-proj-%1", str(transcript))
+    adopted = await core.adopt_agents()
+    assert adopted[0].transcript_path == str(transcript)
+    assert adopted[0].tail is not None
+
+
+async def test_adopt_without_transcript_registers_tailless(tmp_path: Path) -> None:
+    panes = make_panes(("%1", "claude", "/Users/x/proj", "s"))
+    core = make_core(tmp_path, list_panes=lambda: asyncio.sleep(0, result=panes))
+    adopted = await core.adopt_agents()
+    assert adopted[0].transcript_path is None
+    assert adopted[0].tail is None
+
+
+async def test_adopt_prunes_transcripts_of_unadopted_agents(tmp_path: Path) -> None:
+    panes = make_panes(("%1", "claude", "/Users/x/proj", "s"))
+    core = make_core(tmp_path, list_panes=lambda: asyncio.sleep(0, result=panes))
+    core.state.set_transcript("claude-proj-%1", "/tmp/live.jsonl")
+    core.state.set_transcript("claude-dead-%9", "/tmp/dead.jsonl")
+    await core.adopt_agents()
+    assert core.state.transcript("claude-proj-%1") == "/tmp/live.jsonl"
+    assert core.state.transcript("claude-dead-%9") is None
+
+
+async def test_adopt_announces_to_pinned_chats_only(tmp_path: Path) -> None:
+    provider = FakeProvider()
+    panes = make_panes(("%1", "claude", "/Users/x/proj", "s"))
+    core = make_core(tmp_path, provider, list_panes=lambda: asyncio.sleep(0, result=panes))
+    core.state.set_active_agent(42, "claude-proj-%1")
+    core.state.set_active_agent(43, "claude-gone-%9")
+    adopted = await core.adopt_agents()
+    await core.announce_adopted(adopted)
+    assert [t[0] for t in provider.texts] == [42]
+    assert "re-attached" in provider.texts[0][1]
+
+
+async def test_announce_without_adopted_agents_is_silent(tmp_path: Path) -> None:
+    provider = FakeProvider()
+    core = make_core(tmp_path, provider)
+    await core.announce_adopted([])
+    assert provider.texts == []
+
+
+async def test_register_persists_transcript_and_deregister_drops_it(tmp_path: Path) -> None:
+    core = make_core(tmp_path)
+    await core.handle(
+        {
+            "v": 1,
+            "op": "register",
+            "agent_id": "claude-p-%1",
+            "name": "n",
+            "session_name": "/p",
+            "modes": [],
+            "tmux_target": "%1",
+            "transcript_path": "/tmp/t.jsonl",
+        }
+    )
+    assert core.state.transcript("claude-p-%1") == "/tmp/t.jsonl"
+    await core.handle({"v": 1, "op": "deregister", "agent_id": "claude-p-%1"})
+    assert core.state.transcript("claude-p-%1") is None

@@ -72,6 +72,8 @@ async def serve(cfg: Config, base: Path) -> None:
     core = Core(config=cfg, registry=Registry(), state=state, provider=provider)
     provider.bind(core)
     register_all(core)
+    # before Telegram traffic can arrive: re-attach agents from live panes
+    adopted = await core.adopt_agents()
 
     server = JsonlServer(core, base / "server.sock")
     (base / "server.pid").write_text(str(os.getpid()))
@@ -86,6 +88,7 @@ async def serve(cfg: Config, base: Path) -> None:
     feature_tasks = [asyncio.create_task(coro) for coro in background_tasks()]
     try:
         await provider.start(commands=MENU)
+        await core.announce_adopted(adopted)
         log.info("ready: base %s, agents %d", base, len(core.registry.snapshot()))
         await stop.wait()
     finally:

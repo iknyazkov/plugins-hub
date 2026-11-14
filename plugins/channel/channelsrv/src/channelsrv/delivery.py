@@ -72,6 +72,60 @@ async def session_names() -> list[str]:
     return [line for line in out.decode().splitlines() if line]
 
 
+PANE_FORMAT = "#{pane_id}\t#{pane_current_command}\t#{pane_current_path}\t#{session_name}"
+
+
+def parse_panes(text: str) -> list[dict[str, str]]:
+    """Parses ``list-panes`` output rows of four tab-separated fields."""
+    panes: list[dict[str, str]] = []
+    for line in text.splitlines():
+        parts = line.split("\t")
+        if len(parts) != 4 or not parts[0]:
+            continue
+        panes.append(
+            {"id": parts[0], "command": parts[1], "path": parts[2], "session": parts[3]}
+        )
+    return panes
+
+
+async def list_panes() -> list[dict[str, str]]:
+    """All panes on the socket; empty when tmux is unreachable."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *_base(),
+            "list-panes",
+            "-a",
+            "-F",
+            PANE_FORMAT,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        out, _ = await proc.communicate()
+    except OSError:
+        return []
+    if proc.returncode != 0:
+        return []
+    return parse_panes(out.decode())
+
+
+def slugify(base: str) -> str:
+    """The hook's project-slug transform (hooks/channel-hook ``identity()``)."""
+    slug = "".join(c if (c.isalnum() or c in "._-") else "-" for c in base).strip("-")
+    return slug or "session"
+
+
+def agent_id_for(path: str, pane: str) -> str:
+    """The agent id a hook in this pane would register: ``claude-{slug}-{pane}``."""
+    return f"claude-{slugify(os.path.basename(path) or 'session')}-{pane}"
+
+
+def agent_name_for(session: str | None, path: str, pane: str) -> str:
+    """The display name a hook in this pane would register (no env overrides)."""
+    base = os.path.basename(path) or "session"
+    pane_num = pane.lstrip("%") or pane
+    return f"{session}-{base}-{pane_num}" if session else f"{base}-{pane_num}"
+
+
 async def new_session(name: str, command: str, cwd: str) -> None:
     """Spawns a detached tmux session running ``command``.
 

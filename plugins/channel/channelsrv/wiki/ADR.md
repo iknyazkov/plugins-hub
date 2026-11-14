@@ -205,3 +205,34 @@ rotation via @BotFather remains recommended practice.
 
 **Consequences:** less HTTP-level visibility when debugging the Telegram
 provider; enable temporarily, never commit logs.
+
+## ADR-0013 — Startup pane-scan adoption; MCP transport removed
+
+**Status:** accepted (decided 2026-11-14, recorded 2026-11-14)
+
+**Context:** the registry is in-memory (ADR-0006), so every restart emptied
+it; an idle tmux pane fires no hook, so nothing re-registered it — after
+`/restart` Telegram messages landed in the selection hint. The only
+re-attach path was a hook firing inside the pane. The MCP bridge fallback
+(ADR-0003) had no users: sessions without tmux never happen, and in tmux it
+deliberately idled.
+
+**Decision:** on every start the daemon scans tmux panes running `claude`
+(`list-panes`), reproduces the hook's identity formula
+(`claude-{slug}-{pane}` from the pane's cwd), and re-registers the found
+sessions — liveness is the pane scan itself, nothing about liveness is
+persisted. `state.json` gains per-agent last `transcript_path` (data, not
+liveness: the file does not die with the daemon), so re-attached agents
+resume streaming without waiting for a hook. Chats pinned to a re-attached
+agent get a short «re-attached» note, making dropped-during-downtime
+messages visible instead of silent. The MCP server (`.mcp.json`, tools,
+non-tmux registration, resident events long-poll) is removed;
+`bridge/channel_mcp.py` stays as the hook shim's transport + daemon-lifecycle
+library.
+
+**Consequences:** supersedes the fallback half of ADR-0003 and the
+connection-liveness half of ADR-0007 (only tmux agents remain); Telegram
+messages typed while the daemon is down are still dropped
+(`drop_pending_updates`), the note just says so. A claude pane whose plugin
+hooks are gone would still be adopted — accepted, since the plugin is
+installed user-level and hooks fire in every session anyway.

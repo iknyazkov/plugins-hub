@@ -1,14 +1,10 @@
 # channel
 
 Telegram remote control for agent sessions. The bundled
-[channelsrv](channelsrv/) daemon owns the bot; a session joins it in one of
-two transports:
-
-- **Hooks + tmux (primary)** — the session lives in a tmux pane; plugin hooks
-  register it with the daemon, incoming messages are pasted into the pane,
-  finished replies go back to Telegram automatically. No Claude Code flags.
-- **MCP bridge** — a resident stdio MCP server (for sessions without tmux);
-  same daemon, explicit tool calls instead of hooks.
+[channelsrv](channelsrv/) daemon owns the bot; a session joins it through
+the plugin hooks: the session lives in a tmux pane, hooks register it with
+the daemon, incoming messages are pasted into the pane, finished replies go
+back to Telegram automatically. No Claude Code flags, no MCP.
 
 One daemon per machine serves many agent sessions; each session registers as
 a separate agent.
@@ -20,7 +16,7 @@ a separate agent.
 ```
 
 1. Install [uv](https://docs.astral.sh/uv/) — the daemon is spawned with it.
-   The hooks/bridge run on plain `python3` (stdlib only).
+   The hook shim runs on plain `python3` (stdlib only).
 2. Start any session with the plugin once — it creates
    `~/.config/channelsrv/` with an `.env` template.
 3. Put the bot token from @BotFather into `~/.config/channelsrv/.env`,
@@ -29,9 +25,9 @@ a separate agent.
 4. Message the bot from Telegram — the first agent picks up automatically,
    or pick explicitly with `/agents`.
 
-## How the tmux transport works
+## How it works
 
-The daemon keeps the daemon alive (`healthz` probe → kill by `server.pid` →
+The hook shim keeps the daemon alive (`healthz` probe → kill by `server.pid` →
 spawn `uv run channelsrv` under a flock → poll healthz). Then:
 
 | Hook | Effect |
@@ -45,10 +41,14 @@ spawn `uv run channelsrv` under a flock → poll healthz). Then:
 A Telegram message to the active agent is bracketed-pasted into its pane
 (`load-buffer` → `paste-buffer -p -r -d` → `Enter`), exactly like typing it.
 
-Outside tmux the hooks do nothing, and the MCP bridge takes over: it
-registers the session and exposes `channel_set_status`, `channel_send`,
-`channel_request_approval` and `channel_wait_events` (drain buffered events).
-In a tmux session the bridge deliberately stays idle — hooks own the channel.
+**Daemon restarts keep agents attached.** The registry is in-memory (a
+restart wipes it) and an idle pane fires no hook — so on every start the
+daemon scans tmux panes running `claude`, reproduces each hook's agent
+identity, re-registers the found sessions and restores their last
+`transcript_path` from `state.json` (streaming resumes without waiting for
+the next hook event). Chats pinned to a re-attached agent get a short
+«re-attached» note — messages typed while the daemon was down are dropped
+by Telegram's update queue, and the note makes that visible.
 
 ## Environment
 
@@ -57,8 +57,7 @@ In a tmux session the bridge deliberately stays idle — hooks own the channel.
 | `CHANNELSRV_HOME` | daemon state dir override (default `~/.config/channelsrv`) |
 | `CHANNEL_TMUX_SOCKET` | tmux server name for delivery (`tmux -L`), default socket |
 | `CHANNEL_HOOK_VERDICT_WAIT` | seconds the `PermissionRequest` hook waits for Telegram (default 20) |
-| `CHANNEL_AGENT_ID` | bridge registry identity override (parallel sessions in one project) |
-| `CHANNEL_AGENT_NAME` | display name in Telegram (hooks default: `<tmux session>-<project dir>-<pane number>`; bridge default: project directory name) |
+| `CHANNEL_AGENT_NAME` | display name in Telegram (default: `<tmux session>-<project dir>-<pane number>`) |
 | `CHANNEL_SESSION_NAME` | session label in `/status` (default: project path) |
 | `CHANNEL_AGENT_MODES` | comma-separated modes offered via the bot's `/mode` |
 | `CHANNEL_CRON_TIMEOUT` | per-run timeout for `/cron` jobs in seconds (default 600) |

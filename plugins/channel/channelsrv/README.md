@@ -1,7 +1,7 @@
 # channelsrv
 
-A local daemon channel: Telegram bot ↔ a zoo of agent "bridges" (Claude Code,
-Codex, any process with a plugin). One server per machine, one `get_updates`
+A local daemon channel: Telegram bot ↔ agent sessions (Claude Code in tmux,
+any process speaking the protocol). One server per machine, one `get_updates`
 per bot token; agents come and go, the server stays.
 
 ## Run
@@ -38,13 +38,13 @@ The real env beats the file.
 ```
 ~/.config/channelsrv/
 ├── .env         # credentials (0600)
-├── state.json   # active agent choice per chat (atomic writes)
+├── state.json   # active agent choice per chat, last transcript per agent (atomic writes)
 ├── server.pid
-├── server.sock  # UDS, JSONL protocol for bridges
+├── server.sock  # UDS, JSONL protocol for clients
 └── logs/server.log  # rotation 5MB × 3
 ```
 
-## Bridge protocol
+## Client protocol
 
 One connection = one frame: a request `{"v":1,"op":"…"}\n` → a response
 `{"ok":true,…}` or `{"ok":false,"error":"…"}\n`. Debugging:
@@ -55,7 +55,7 @@ echo '{"v":1,"op":"healthz"}' | socat - UNIX-CONNECT:~/.config/channelsrv/server
 
 | op | fields | what it does |
 |---|---|---|
-| `healthz` | — | alive? (300ms budget; if hung, the bridge kills by `server.pid` and restarts under a flock) |
+| `healthz` | — | alive? (300ms budget; if hung, the hook shim kills by `server.pid` and restarts under a flock) |
 | `register` | `agent_id, name, session_name, modes[]`, `tmux_target?`, `transcript_path?` | registration (re-registration replaces); `tmux_target` = the agent's tmux pane; `transcript_path` = the session transcript JSONL the daemon tails for the progress chain |
 | `deregister` | `agent_id` | leaving |
 | `status` | `agent_id, status, detail?, mode?` | status: `idle/thinking/waiting_user/waiting_approval/done/error` (+`mode` — the current mode) |
@@ -64,9 +64,14 @@ echo '{"v":1,"op":"healthz"}' | socat - UNIX-CONNECT:~/.config/channelsrv/server
 | `context` | `agent_id, input, output` | store last-turn context usage (reported by the Stop hook from the session transcript) |
 | `events` | `agent_id, cursor` | long-poll 25s: `user_message {chat_id, text}`, `approval_result {approval_id, approved}`, `mode_set {mode}`; for `tmux_target` agents, incoming user messages are also pasted into the pane (`delivery.py`) |
 
-A bridge is a resident process in the agent's session (for Claude Code that is
-an MCP server) keeping `events` open; liveness = a live connection, silence
->30s → `offline`.
+Clients are the hook shims inside agent sessions. For tmux agents (all of
+them today) liveness is the pane itself: the sweep marks an agent offline
+when its pane is gone, silence says nothing. After a restart the daemon
+re-attaches agents itself: it scans tmux panes running `claude`, reproduces
+the hook's identity (`claude-{slug}-{pane}`), restores each agent's last
+`transcript_path` from `state.json`, and posts a short «re-attached» note in
+the chats pinned to them — messages typed while the daemon was down are lost
+(Telegram updates are dropped on startup), and the note makes that visible.
 
 ## Bot commands
 
@@ -78,7 +83,7 @@ an MCP server) keeping `events` open; liveness = a live connection, silence
 - `/close <session>` — kill a tmux session
 - `/context` — last-turn context usage of the active agent (absolute tokens; the Stop hook reads them from the session transcript)
 - `/cron list | add <plain words> | remove <id|prefix> | run <id|prefix>` — scheduled agent jobs: `/cron add` turns plain words into a job via the NL converter; when a job fires the daemon spawns a throwaway tmux agent session in the job's cwd, pastes the job's prompt and sends the full reply to the creating chat. A launch alias named in the add text («элиас запуска zaiclaude») becomes the job's own agent command; jobs without one use `CHANNEL_AI_AGENT`. Recurring requests get a 5-field cron; one-shot ones («через 5 минут», «сегодня в 18:00») store an absolute `at` time, run once and remove themselves (a late fire still runs; a one-shot blocked by the run cap waits for a free slot). Jobs persist in `cron.json`; recurring runs missed while the daemon was down are skipped, overlap and more than 3 concurrent runs are skipped with a chat note. Run sessions (`cron_<6 hex>-…`) left over from a crashed daemon are killed at startup; `CHANNEL_CRON_TIMEOUT` overrides the 10-minute per-run timeout
-- `/restart` — respawn the daemon: it spawns a fresh `uv run channelsrv` (the same command the bridge uses), replies, and exits — the Telegram gap is a couple of seconds
+- `/restart` — respawn the daemon: it spawns a fresh `uv run channelsrv` (the same command the hook shim uses), replies, and exits — the Telegram gap is a couple of seconds
 - text — a message to the active agent; approvals arrive as cards with buttons
 
 While an agent is `thinking`, the daemon renews the typing indicator every 5s
@@ -106,7 +111,7 @@ agent auto-selection.
 src/channelsrv/
 ├── main.py          # entry: config, logs, pidfile, lifecycle
 ├── config.py        # .env, paths, template
-├── state.py         # active agent per chat (state.json)
+├── state.py         # active agent per chat, last transcript per agent (state.json)
 ├── protocol.py      # frames, ops, statuses, events
 ├── registry.py      # agents, cursor events, liveness
 ├── server.py        # Core (dispatch/routing) + JsonlServer (UDS)

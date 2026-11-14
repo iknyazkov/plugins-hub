@@ -74,3 +74,52 @@ def test_no_tmp_leftover(tmp_path: Path) -> None:
     store.load()
     store.set_active_agent(1, "a")
     assert list(tmp_path.iterdir()) == [tmp_path / "state.json"]
+
+
+def test_transcript_roundtrip(tmp_path: Path) -> None:
+    store = StateStore(tmp_path / "state.json")
+    store.load()
+    assert store.transcript("claude-x-%1") is None
+    store.set_transcript("claude-x-%1", "/tmp/t.jsonl")
+    assert store.transcript("claude-x-%1") == "/tmp/t.jsonl"
+
+
+def test_transcript_persists_across_reload(tmp_path: Path) -> None:
+    path = tmp_path / "state.json"
+    store = StateStore(path)
+    store.load()
+    store.set_transcript("claude-x-%1", "/tmp/t.jsonl")
+    reopened = StateStore(path)
+    reopened.load()
+    assert reopened.transcript("claude-x-%1") == "/tmp/t.jsonl"
+
+
+def test_transcript_drop(tmp_path: Path) -> None:
+    store = StateStore(tmp_path / "state.json")
+    store.load()
+    store.set_transcript("claude-x-%1", "/tmp/t.jsonl")
+    store.drop_transcript("claude-x-%1")
+    assert store.transcript("claude-x-%1") is None
+
+
+def test_transcripts_load_from_old_file_without_key(tmp_path: Path) -> None:
+    path = tmp_path / "state.json"
+    path.write_text('{"chats": {"1": {"active_agent": "a"}}}')
+    store = StateStore(path)
+    store.load()
+    assert store.transcript("a") is None
+    assert store.active_agent(1) == "a"
+
+
+def test_prune_transcripts_keeps_only_given(tmp_path: Path) -> None:
+    path = tmp_path / "state.json"
+    store = StateStore(path)
+    store.load()
+    store.set_transcript("claude-a-%1", "/tmp/a.jsonl")
+    store.set_transcript("claude-b-%2", "/tmp/b.jsonl")
+    store.prune_transcripts({"claude-a-%1"})
+    assert store.transcript("claude-a-%1") == "/tmp/a.jsonl"
+    assert store.transcript("claude-b-%2") is None
+    reopened = StateStore(path)
+    reopened.load()
+    assert reopened.transcript("claude-b-%2") is None
