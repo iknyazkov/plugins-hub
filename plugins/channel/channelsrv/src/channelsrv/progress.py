@@ -137,6 +137,11 @@ def drain_chunks(tail: TurnTail) -> None:
 def chain_covers(tail: TurnTail, final_text: str) -> bool:
     """True when the chain already shows the final reply verbatim.
 
+    KNOWN-ISSUE 3 (wiki/KNOWN_ISSUES.md): a rolled-over chain (pending
+    segments, or a final reply split into pieces) is never "covered", so
+    long turns duplicate — the full reply goes out and close_turn re-sends
+    the segments.
+
     The Stop hook re-sends ``last_assistant_message``, which the chain has
     usually streamed a moment earlier — the caller drains the tail first, so
     a verbatim match means the second copy would be pure duplication.

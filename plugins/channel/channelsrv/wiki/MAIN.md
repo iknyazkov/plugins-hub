@@ -22,8 +22,9 @@ fungible.
 |---|---|
 | [SCHEMA.md](SCHEMA.md) | how this wiki works |
 | [ADR.md](ADR.md) | every architecture decision, oldest first |
+| [KNOWN_ISSUES.md](KNOWN_ISSUES.md) | live bugs: diagnosed, not yet fixed |
 
-Topical pages (created as needed): none yet.
+Topical pages (created as needed): [KNOWN_ISSUES.md](KNOWN_ISSUES.md).
 
 ## Decisions at a glance
 

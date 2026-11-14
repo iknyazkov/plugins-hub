@@ -81,6 +81,8 @@ def register(agent_id: str, name: str, cwd: str) -> None:
             "agent_id": agent_id,
             "name": name,
             "session_name": os.environ.get("CHANNEL_SESSION_NAME") or cwd,
+            # KNOWN-ISSUE 2 (wiki/KNOWN_ISSUES.md): always empty — the hook
+            # never reads CHANNEL_AGENT_MODES, so tmux agents have no modes.
             "modes": [],
             "tmux_target": os.environ["TMUX_PANE"],
             "transcript_path": TRANSCRIPT_PATH,
@@ -94,6 +96,9 @@ def register(agent_id: str, name: str, cwd: str) -> None:
 
 def op(payload: dict, ids: tuple[str, str, str], retry: bool = True) -> dict:
     """One daemon op; on 'not registered' (daemon restarted mid-session) re-register once."""
+    # KNOWN-ISSUE 1 (wiki/KNOWN_ISSUES.md): this retry only fires when the
+    # pane runs a hook — after a daemon restart an idle pane stays invisible
+    # to Telegram until something happens inside it.
     agent_id, name, cwd = ids
     try:
         resp = bridge.call_op(payload, bridge.OP_TIMEOUT)

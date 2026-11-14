@@ -27,6 +27,10 @@ class Feature:
             await core.provider.send_card(chat_id, title, rows)
 
         async def set_mode(chat_id: int, mode: str) -> None:
+            # KNOWN-ISSUE 2 (wiki/KNOWN_ISSUES.md): the event below is only
+            # consumed by an MCP events long-poll — tmux agents never see a
+            # mode_set (on_text pastes user messages only), so /mode is a
+            # no-op for them.
             agent = core.active_agent(chat_id)
             if agent is None:
                 await core.provider.send_text(chat_id, core.select_hint)

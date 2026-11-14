@@ -161,6 +161,10 @@ class Core:
 
     async def close_turn(self, agent: Agent) -> None:
         """Drains the tail one last time, flushes the chain, drops the tail."""
+        # KNOWN-ISSUE 3 (wiki/KNOWN_ISSUES.md): when chain_covers already
+        # said "not covered" in _op_message, this flush re-sends segments the
+        # final reply duplicates; and a message op arriving after this drops
+        # the tail, skipping the duplicate check entirely.
         tail, agent.tail = agent.tail, None
         if tail is not None:
             progress.drain_chunks(tail)  # the close flush skips the throttle
@@ -301,7 +305,10 @@ class Core:
             if agent is not None:
                 return None  # the pick exists but died — make the user choose again
             # a missing pick is a stale pin (the registry lives in memory and a
-            # daemon restart wipes it) — fall through to auto-selection
+            # daemon restart wipes it) — fall through to auto-selection;
+            # KNOWN-ISSUE 1 (wiki/KNOWN_ISSUES.md): right after a restart the
+            # registry is empty, every message lands in the select hint, and
+            # nothing pulls the panes back in
         agents = [a for a in self.registry.snapshot() if not a.service]
         if len(agents) == 1:  # the only agent — auto-selected without questions
             return agents[0]

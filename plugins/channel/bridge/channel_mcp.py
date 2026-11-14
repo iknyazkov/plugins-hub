@@ -322,6 +322,9 @@ class Channel:
                         self.cursor = 0
                         log.info("daemon ready, registered as %s", self.agent_id)
                 if self.hook_mode:
+                    # KNOWN-ISSUE 1 (wiki/KNOWN_ISSUES.md): a passive sleep —
+                    # after a daemon restart this bridge never re-registers
+                    # the pane's agent; only a hook firing in the pane does.
                     self.stop.wait(3600.0)
                     continue
                 resp = call_op(
