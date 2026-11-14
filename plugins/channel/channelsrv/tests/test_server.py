@@ -460,3 +460,34 @@ async def test_register_persists_transcript_and_deregister_drops_it(tmp_path: Pa
     assert core.state.transcript("claude-p-%1") == "/tmp/t.jsonl"
     await core.handle({"v": 1, "op": "deregister", "agent_id": "claude-p-%1"})
     assert core.state.transcript("claude-p-%1") is None
+
+
+async def test_register_replaces_a_ghost_on_the_same_pane(tmp_path: Path) -> None:
+    core = make_core(tmp_path)
+    await core.handle(
+        {
+            "v": 1,
+            "op": "register",
+            "agent_id": "claude-old-%1",
+            "name": "ghost",
+            "session_name": "/p",
+            "modes": [],
+            "tmux_target": "%1",
+            "transcript_path": "/tmp/ghost.jsonl",
+        }
+    )
+    await core.handle(
+        {
+            "v": 1,
+            "op": "register",
+            "agent_id": "claude-new-%1",
+            "name": "real",
+            "session_name": "/p",
+            "modes": [],
+            "tmux_target": "%1",
+            "transcript_path": "/tmp/real.jsonl",
+        }
+    )
+    assert core.registry.get("claude-old-%1") is None  # one pane = one agent
+    assert core.registry.get("claude-new-%1") is not None
+    assert core.state.transcript("claude-old-%1") is None

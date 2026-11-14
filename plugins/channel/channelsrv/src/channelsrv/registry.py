@@ -41,6 +41,9 @@ class Agent:
     #: the closed turn's streamed text — duplicate check for a Stop message op
     #: that arrives after close_turn dropped the tail (reset at the next turn start)
     last_turn_text: str | None = None
+    #: the last reply actually delivered to chats — the close flush must not
+    #: echo it back through the chain if streaming caught up late
+    last_delivered: str | None = None
     #: service agents (e.g. the NL-command converter) are captured, never broadcast
     service: bool = False
     events: deque[tuple[int, dict[str, Any]]] = field(default_factory=deque)

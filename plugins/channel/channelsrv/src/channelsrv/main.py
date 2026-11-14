@@ -46,6 +46,27 @@ def setup_logging(log_file: Path) -> None:
     )
 
 
+def cleanup_files(base: Path, bound_ino: int | None) -> None:
+    """Unlinks the socket and pidfile — but only the ones that are still ours.
+
+    A slow-dying daemon must not delete a successor's files: the successor
+    may have bound a fresh socket and written its own pid before this
+    shutdown's cleanup runs (kill + immediate spawn), and deleting by path
+    would orphan the survivor — hooks could no longer find it.
+    """
+    sock = base / "server.sock"
+    try:
+        if bound_ino is not None and sock.stat().st_ino == bound_ino:
+            sock.unlink()
+    except OSError:
+        pass
+    try:
+        if (base / "server.pid").read_text().strip() == str(os.getpid()):
+            (base / "server.pid").unlink()
+    except OSError:
+        pass
+
+
 def main() -> None:
     base = config.base_dir()
     config.ensure_layout(base)
@@ -105,9 +126,7 @@ async def serve(cfg: Config, base: Path) -> None:
         for task in feature_tasks:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
-        with contextlib.suppress(OSError):
-            (base / "server.sock").unlink(missing_ok=True)
-        (base / "server.pid").unlink(missing_ok=True)
+        cleanup_files(base, server.bound_ino)
         log.info("stopped, socket and pidfile cleaned up")
 
 

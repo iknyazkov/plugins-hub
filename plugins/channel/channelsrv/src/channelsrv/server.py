@@ -104,12 +104,20 @@ class Core:
         modes_raw = request.get("modes", [])
         if not isinstance(modes_raw, list) or not all(isinstance(m, str) for m in modes_raw):
             raise protocol.ProtocolError("field 'modes' must be a list of strings")
+        tmux_target = protocol.opt_str(request, "tmux_target")
+        if tmux_target:  # one pane = one agent: adoption may hold a ghost whose
+            # derived id drifted from the hook's (a session that changed cwd)
+            for other in self.registry.snapshot():
+                if other.tmux_target == tmux_target and other.id != request.get("agent_id"):
+                    self.registry.deregister(other.id)
+                    self.state.drop_transcript(other.id)
+                    log.info("agent %s replaced by %s on pane %s", other.id, request.get("agent_id"), tmux_target)
         agent = self.registry.register(
             agent_id=protocol.req_str(request, "agent_id"),
             name=protocol.req_str(request, "name"),
             session_name=protocol.req_str(request, "session_name"),
             modes=modes_raw,
-            tmux_target=protocol.opt_str(request, "tmux_target"),
+            tmux_target=tmux_target,
             transcript_path=protocol.opt_str(request, "transcript_path"),
         )
         log.info(
@@ -141,6 +149,7 @@ class Core:
         if status == protocol.STATUS_THINKING:
             agent.thinking_since = time.monotonic()
             agent.last_turn_text = None  # a new turn owns its own stream
+            agent.last_delivered = None
         else:
             agent.thinking_since = None
         mode = protocol.opt_str(request, "mode")
@@ -205,6 +214,13 @@ class Core:
             return
         text = tail.chain.text
         if not text or text == tail.sent_text:
+            return
+        if agent.last_delivered and text.rstrip().endswith(agent.last_delivered.strip()):
+            # the reply was already delivered as a message (streaming lagged
+            # behind the Stop hook) — echoing it through the chain would
+            # duplicate it; the chain message keeps its earlier partial text
+            tail.sent_text = text
+            tail.last_touch = time.monotonic()
             return
         for chat_id in chats:
             try:
@@ -420,6 +436,8 @@ class Core:
         if not chats:
             log.warning("message from %s has nowhere to go: no chats yet", agent_id)
             return
+        log.info("reply from %s: %d chars -> %d chat(s)", agent_id, len(text), len(chats))
+        agent.last_delivered = text
         for chat_id in chats:
             await self.provider.send_text(chat_id, text, agent_name=agent.name)
 
@@ -474,6 +492,9 @@ class JsonlServer:
         self._server: asyncio.AbstractServer | None = None
         self._sweeper: asyncio.Task[None] | None = None
         self._progress: asyncio.Task[None] | None = None
+        #: inode of the socket we bound (set in serve()); shutdown deletes
+        #: the file only if it still is ours — a successor may have re-bound
+        self.bound_ino: int | None = None
 
     async def serve(self) -> None:
         self._sock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -483,6 +504,7 @@ class JsonlServer:
             self._handle_conn, path=str(self._sock_path), limit=FRAME_LIMIT
         )
         os.chmod(self._sock_path, 0o600)
+        self.bound_ino = os.stat(self._sock_path).st_ino
         self._sweeper = asyncio.create_task(self._core.sweep_forever())
         self._progress = asyncio.create_task(self._core.progress_forever())
         log.info("listening on %s", self._sock_path)

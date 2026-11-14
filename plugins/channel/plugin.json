@@ -1,6 +1,6 @@
 {
   "name": "channel",
-  "version": "0.1.30",
+  "version": "0.1.31",
   "description": "Telegram remote control for agent sessions: hooks + tmux paste deliver messages into the session and replies back; the hook shim keeps the bundled channelsrv daemon alive and the daemon re-attaches agents after a restart.",
   "keywords": [
     "channel",

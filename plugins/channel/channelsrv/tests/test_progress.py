@@ -321,3 +321,25 @@ async def test_new_turn_forgets_the_previous_stream(
     await think(core)  # a new turn must not inherit the old dedup
     await core.handle({"v": 1, "op": "message", "agent_id": "a1", "text": final})
     assert provider.texts == [(42, final, "agent")]
+
+
+
+
+# ------------------------------------------------- delivered reply vs chain flush
+
+
+async def test_delivered_reply_is_not_re_shown_by_the_chain(
+    world: tuple[Core, FakeProvider, Path],
+) -> None:
+    """The Stop race, symmetric side: the reply was delivered before the
+    chain could stream it (transcript flush lagged) — the close flush must
+    not re-show the delivered text, or the chat sees it twice."""
+    core, provider, transcript = world
+    final = "Финал, обогнавший стрим."
+    resp = await core.handle({"v": 1, "op": "message", "agent_id": "a1", "text": final})
+    assert resp == {"ok": True}
+    assert provider.texts == [(42, final, "agent")]  # delivered, nothing streamed yet
+    write_entry(transcript, assistant_entry({"type": "text", "text": final}))
+    await idle(core)  # the close flush reads the entry — and must skip the echo
+    assert provider.cards == []
+    assert provider.edits == []
