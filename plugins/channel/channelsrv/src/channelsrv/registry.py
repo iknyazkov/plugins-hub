@@ -38,6 +38,9 @@ class Agent:
     tail: progress.TurnTail | None = None
     #: last known context usage {"input": int, "output": int}, reported by the Stop hook
     context: dict[str, int] | None = None
+    #: the closed turn's streamed text — duplicate check for a Stop message op
+    #: that arrives after close_turn dropped the tail (reset at the next turn start)
+    last_turn_text: str | None = None
     #: service agents (e.g. the NL-command converter) are captured, never broadcast
     service: bool = False
     events: deque[tuple[int, dict[str, Any]]] = field(default_factory=deque)

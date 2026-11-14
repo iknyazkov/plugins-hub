@@ -140,6 +140,7 @@ class Core:
         agent.detail = protocol.opt_str(request, "detail")
         if status == protocol.STATUS_THINKING:
             agent.thinking_since = time.monotonic()
+            agent.last_turn_text = None  # a new turn owns its own stream
         else:
             agent.thinking_since = None
         mode = protocol.opt_str(request, "mode")
@@ -169,13 +170,10 @@ class Core:
 
     async def close_turn(self, agent: Agent) -> None:
         """Drains the tail one last time, flushes the chain, drops the tail."""
-        # KNOWN-ISSUE 3 (wiki/KNOWN_ISSUES.md): when chain_covers already
-        # said "not covered" in _op_message, this flush re-sends segments the
-        # final reply duplicates; and a message op arriving after this drops
-        # the tail, skipping the duplicate check entirely.
         tail, agent.tail = agent.tail, None
         if tail is not None:
             progress.drain_chunks(tail)  # the close flush skips the throttle
+            agent.last_turn_text = tail.text_stream  # a late Stop message still dedups
             await self._write_progress(agent, tail)
 
     async def progress_once(self) -> None:
@@ -236,9 +234,17 @@ class Core:
         text = protocol.req_str(request, "text")
         if agent.tail is not None:
             progress.drain_chunks(agent.tail)
-            if progress.chain_covers(agent.tail, text):
-                log.info("progress: final already streamed — duplicate skipped")
-                return protocol.ok()
+            covered = progress.chain_covers(agent.tail, text)
+        else:
+            covered = False
+        # the closed turn's stream: a Stop message op can arrive after
+        # close_turn dropped the tail — live_agent then re-opens a fresh,
+        # empty tail, so the saved stream is the only witness
+        if not covered and progress.stream_covers(agent.last_turn_text or "", text):
+            covered = True
+        if covered:
+            log.info("progress: final already streamed — duplicate skipped")
+            return protocol.ok()
         await self.deliver_from_agent(agent.id, text)
         return protocol.ok()
 

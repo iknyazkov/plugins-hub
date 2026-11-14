@@ -160,7 +160,11 @@ a mid-turn daemon restart; the final Stop reply is skipped when the chain
 already shows it verbatim.
 
 **Consequences:** progress depends on registration carrying the transcript
-path; restart mid-turn costs at most a duplicated partial chain.
+path; restart mid-turn costs at most a duplicated partial chain. The
+duplicate skip compares against the turn's full text stream (kept on the
+tail, then on the agent until the next turn), so chain rollovers and a Stop
+message arriving after close_turn no longer duplicate the reply (fixed
+2026-11-14, was KI-3).
 
 **Alternatives considered:** hook-driven streaming — rejected: more moving
 parts; the transcript tail is self-healing.

@@ -22,9 +22,9 @@ def assistant_entry(*blocks: dict[str, object]) -> dict[str, object]:
 
 
 class TestExtractChunks:
-    def test_text_block_becomes_chunk(self) -> None:
+    def test_text_block_becomes_a_text_chunk(self) -> None:
         entry = assistant_entry({"type": "text", "text": "Понял задачу.\n"})
-        assert progress.extract_chunks(entry) == ["Понял задачу."]
+        assert progress.extract_chunks(entry) == [("text", "Понял задачу.")]
 
     def test_thinking_blocks_are_skipped(self) -> None:
         entry = assistant_entry({"type": "thinking", "thinking": "internal"})
@@ -34,11 +34,11 @@ class TestExtractChunks:
         assert progress.extract_chunks({"type": "user"}) == []
         assert progress.extract_chunks({"type": "assistant", "message": {}}) == []
 
-    def test_tool_use_becomes_a_line(self) -> None:
+    def test_tool_use_becomes_a_tool_chunk(self) -> None:
         entry = assistant_entry(
             {"type": "tool_use", "name": "Agent", "input": {"description": "Research limits"}}
         )
-        assert progress.extract_chunks(entry) == ["*⚙ Agent(Research limits)*"]
+        assert progress.extract_chunks(entry) == [("tool", "*⚙ Agent(Research limits)*")]
 
 
 class TestToolLine:
@@ -203,10 +203,12 @@ async def test_rollover_abandons_the_old_message(world: tuple[Core, FakeProvider
 # ------------------------------------------------------- final-duplicate skip
 
 
-async def test_chain_covers_the_streamed_final() -> None:
-    tail = progress.TurnTail(path="/dev/null")
-    tail.chain.add("first note")
-    tail.chain.add("final answer text")
+async def test_chain_covers_the_streamed_final(tmp_path: Path) -> None:
+    tail = drained_tail(
+        tmp_path,
+        assistant_entry({"type": "text", "text": "first note"}),
+        assistant_entry({"type": "text", "text": "final answer text"}),
+    )
     assert progress.chain_covers(tail, "final answer text")
     assert not progress.chain_covers(tail, "different final")
     assert not progress.chain_covers(tail, "  ")  # blank finals are never "covered"
@@ -233,3 +235,89 @@ async def test_unseen_final_is_delivered(world: tuple[Core, FakeProvider, Path])
     )
     assert resp == {"ok": True}
     assert provider.texts == [(42, "Финал, которого нет в цепочке", "agent")]
+
+
+# ------------------------------------------- turn text stream (the dedup record)
+
+
+def drained_tail(tmp_path: Path, *entries: dict[str, object]) -> progress.TurnTail:
+    transcript = tmp_path / "t.jsonl"
+    for entry in entries:
+        write_entry(transcript, entry)
+    tail = progress.TurnTail(path=str(transcript))
+    progress.drain_chunks(tail)
+    return tail
+
+
+def test_stream_tracks_text_but_not_tool_lines(tmp_path: Path) -> None:
+    tail = drained_tail(
+        tmp_path,
+        assistant_entry(
+            {"type": "text", "text": "шаг один"},
+            {"type": "tool_use", "name": "Bash", "input": {"command": "ls"}},
+        ),
+        assistant_entry({"type": "text", "text": "финальный ответ"}),
+    )
+    assert tail.text_stream == "шаг один\n\nфинальный ответ"
+
+
+async def test_chain_covers_across_rollover(tmp_path: Path) -> None:
+    tail = drained_tail(
+        tmp_path,
+        assistant_entry({"type": "text", "text": "a" * (progress.SEGMENT_LIMIT - 1)}),
+        assistant_entry({"type": "text", "text": "финал"}),
+    )
+    assert tail.pending  # the first segment rolled over
+    assert progress.chain_covers(tail, "финал")  # was False before the fix
+
+
+async def test_chain_covers_rejects_partial_coverage(tmp_path: Path) -> None:
+    tail = drained_tail(tmp_path, assistant_entry({"type": "text", "text": "только начало"}))
+    assert not progress.chain_covers(tail, "начало и продолжение")  # the stream is a prefix, not the whole
+
+
+async def test_final_covered_across_rollover_is_not_sent_again(
+    world: tuple[Core, FakeProvider, Path],
+) -> None:
+    core, provider, transcript = world
+    write_entry(transcript, assistant_entry({"type": "text", "text": "a" * (progress.SEGMENT_LIMIT - 1)}))
+    final = "Итог длинного turn'а."
+    write_entry(transcript, assistant_entry({"type": "text", "text": final}))
+    resp = await core.handle({"v": 1, "op": "message", "agent_id": "a1", "text": final})
+    assert resp == {"ok": True}
+    assert provider.texts == []  # rolled chain no longer defeats the duplicate skip
+
+
+async def test_late_message_after_idle_is_skipped(
+    world: tuple[Core, FakeProvider, Path],
+) -> None:
+    """Race: turn-end lands before the message op — the closed turn still owns the text."""
+    core, provider, transcript = world
+    final = "Уже отстримлено."
+    write_entry(transcript, assistant_entry({"type": "text", "text": final}))
+    await idle(core)  # close_turn ran first: tail gone
+    resp = await core.handle({"v": 1, "op": "message", "agent_id": "a1", "text": final})
+    assert resp == {"ok": True}
+    assert provider.texts == []
+
+
+async def test_new_message_after_idle_is_delivered(
+    world: tuple[Core, FakeProvider, Path],
+) -> None:
+    core, provider, transcript = world
+    write_entry(transcript, assistant_entry({"type": "text", "text": "turn text"}))
+    await idle(core)
+    await core.handle({"v": 1, "op": "message", "agent_id": "a1", "text": "свежий текст"})
+    assert provider.texts == [(42, "свежий текст", "agent")]
+
+
+async def test_new_turn_forgets_the_previous_stream(
+    world: tuple[Core, FakeProvider, Path],
+) -> None:
+    core, provider, transcript = world
+    final = "тот же финал"
+    write_entry(transcript, assistant_entry({"type": "text", "text": final}))
+    await idle(core)  # stream saved
+    await think(core)  # a new turn must not inherit the old dedup
+    await core.handle({"v": 1, "op": "message", "agent_id": "a1", "text": final})
+    assert provider.texts == [(42, final, "agent")]

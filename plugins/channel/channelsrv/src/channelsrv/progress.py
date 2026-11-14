@@ -47,25 +47,25 @@ def tool_line(name: str, tool_input: object) -> str:
     return f"*⚙ {name}({detail})*" if detail else f"*⚙ {name}*"
 
 
-def extract_chunks(entry: object) -> list[str]:
-    """Chunks to show from one transcript entry: text blocks and tool calls."""
+def extract_chunks(entry: object) -> list[tuple[str, str]]:
+    """``(kind, chunk)`` pairs from one transcript entry: text blocks and tool calls."""
     if not isinstance(entry, dict) or entry.get("type") != "assistant":
         return []
     message = entry.get("message")
     blocks = message.get("content") if isinstance(message, dict) else None
     if not isinstance(blocks, list):
         return []
-    chunks: list[str] = []
+    chunks: list[tuple[str, str]] = []
     for block in blocks:
         if not isinstance(block, dict):
             continue
         kind = block.get("type")
         if kind == "text" and isinstance(block.get("text"), str) and block["text"].strip():
-            chunks.append(block["text"].strip())
+            chunks.append(("text", block["text"].strip()))
         elif kind == "tool_use":
             name = block.get("name")
             chunks.append(
-                tool_line(str(name) if name else "tool", block.get("input") or {})
+                ("tool", tool_line(str(name) if name else "tool", block.get("input") or {}))
             )
     return chunks
 
@@ -103,6 +103,11 @@ def _pieces(chunk: str) -> list[str]:
     ]
 
 
+#: how much of the turn's streamed text to remember for the duplicate check
+#: (a suffix match only needs the tail; Telegram finals sit far below this)
+STREAM_KEEP = 200_000
+
+
 @dataclass
 class TurnTail:
     """One agent's live-turn tail state; exists only while the turn runs."""
@@ -114,6 +119,9 @@ class TurnTail:
     #: segments closed before Telegram ever saw them (rollover within one
     #: throttle window) — they must still be sent, or their text is lost
     pending: list[str] = field(default_factory=list)
+    #: every text chunk streamed this turn (tool lines excluded) — the record
+    #: the final-reply duplicate check compares against; survives rollovers
+    text_stream: str = ""
     messages: dict[int, int] = field(default_factory=dict)  # chat_id -> live message
     sent_text: str = ""  # what the live message currently shows
     last_touch: float = 0.0  # monotonic of the last Telegram write
@@ -122,38 +130,42 @@ class TurnTail:
 def drain_chunks(tail: TurnTail) -> None:
     """Reads new transcript chunks into the chain, collecting unsent segments."""
     rolled = False
-    for chunk in read_new_chunks(tail):
+    for kind, chunk in read_new_chunks(tail):
         closed_segments = tail.chain.add(chunk)
         if closed_segments:
             rolled = True
         for closed in closed_segments:
             if closed != tail.sent_text:  # already shown -> just abandon the message
                 tail.pending.append(closed)
+        if kind == "text":  # the turn's own record of what it streamed
+            joined = f"{tail.text_stream}\n\n{chunk}" if tail.text_stream else chunk
+            tail.text_stream = joined[-STREAM_KEEP:]
     if rolled:  # the live segment died: its message is abandoned, a new one follows
         tail.messages.clear()
         tail.sent_text = ""
 
 
-def chain_covers(tail: TurnTail, final_text: str) -> bool:
-    """True when the chain already shows the final reply verbatim.
+def stream_covers(stream: str, final_text: str) -> bool:
+    """True when the turn's text stream already carried the reply verbatim.
 
-    KNOWN-ISSUE 3 (wiki/KNOWN_ISSUES.md): a rolled-over chain (pending
-    segments, or a final reply split into pieces) is never "covered", so
-    long turns duplicate — the full reply goes out and close_turn re-sends
-    the segments.
-
-    The Stop hook re-sends ``last_assistant_message``, which the chain has
-    usually streamed a moment earlier — the caller drains the tail first, so
-    a verbatim match means the second copy would be pure duplication.
+    A suffix match: the Stop hook re-sends ``last_assistant_message``, which
+    the turn has streamed as its last text chunk — a verbatim tail means the
+    second copy would be pure duplication. Partial coverage is not coverage:
+    the full reply goes out (a self-contained final beats a shaved one).
     """
     text = final_text.strip()
-    if not text or tail.pending:  # unsent segments exist — the chain shows less than was made
+    if not text:
         return False
-    chain = tail.chain.text.rstrip()
-    return chain == text or chain.endswith(text)
+    stream = stream.rstrip()
+    return stream == text or stream.endswith(text)
 
 
-def read_new_chunks(tail: TurnTail) -> list[str]:
+def chain_covers(tail: TurnTail, final_text: str) -> bool:
+    """stream_covers against the live tail's turn stream (drain the tail first)."""
+    return stream_covers(tail.text_stream, final_text)
+
+
+def read_new_chunks(tail: TurnTail) -> list[tuple[str, str]]:
     """Drains the transcript tail; survives a missing or truncated file."""
     try:
         with open(tail.path, "rb") as f:
@@ -172,7 +184,7 @@ def read_new_chunks(tail: TurnTail) -> list[str]:
     tail.buf += data
     lines = tail.buf.split(b"\n")
     tail.buf = lines.pop()  # the last piece may be a partial line
-    chunks: list[str] = []
+    chunks: list[tuple[str, str]] = []
     for line in lines:
         try:
             entry = json.loads(line)
