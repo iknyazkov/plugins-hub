@@ -26,23 +26,6 @@ fungible.
 
 Topical pages (created as needed): [KNOWN_ISSUES.md](KNOWN_ISSUES.md).
 
-## Decisions at a glance
-
-| ADR | Decision |
-|---|---|
-| [0001](ADR.md) | Stationary daemon, transient agents |
-| [0002](ADR.md) | One token = one daemon |
-| [0003](ADR.md) | Hooks + tmux paste primary, MCP fallback; CC channels stripped |
-| [0004](ADR.md) | Deny AskUserQuestion; structured questions as plain text |
-| [0005](ADR.md) | `.env` fill-gaps export into the daemon env |
-| [0006](ADR.md) | In-memory registry, stale pins fall through |
-| [0007](ADR.md) | Liveness = connection (MCP) or pane (tmux), not silence |
-| [0008](ADR.md) | Never kill on a slow healthz; self-healing poll loop |
-| [0009](ADR.md) | Progress chain tails the transcript |
-| [0010](ADR.md) | `/context` reports absolute tokens |
-| [0011](ADR.md) | `/restart`: the daemon respawns itself |
-| [0012](ADR.md) | Token hygiene: httpx silenced, rotation recommended |
-
 ## Hard-won lessons (pointers)
 
 Diagnosing a hang: daemon log first
