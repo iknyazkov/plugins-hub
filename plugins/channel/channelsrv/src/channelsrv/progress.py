@@ -13,6 +13,8 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 
+from channelsrv.providers.base import MessageId
+
 #: daemon tick between transcript reads
 PROGRESS_INTERVAL = 2.0
 #: minimum seconds between Telegram writes for one agent (edit rate limits)
@@ -60,12 +62,19 @@ def extract_chunks(entry: object) -> list[tuple[str, str]]:
         if not isinstance(block, dict):
             continue
         kind = block.get("type")
-        if kind == "text" and isinstance(block.get("text"), str) and block["text"].strip():
+        if (
+            kind == "text"
+            and isinstance(block.get("text"), str)
+            and block["text"].strip()
+        ):
             chunks.append(("text", block["text"].strip()))
         elif kind == "tool_use":
             name = block.get("name")
             chunks.append(
-                ("tool", tool_line(str(name) if name else "tool", block.get("input") or {}))
+                (
+                    "tool",
+                    tool_line(str(name) if name else "tool", block.get("input") or {}),
+                )
             )
     return chunks
 
@@ -122,7 +131,9 @@ class TurnTail:
     #: every text chunk streamed this turn (tool lines excluded) — the record
     #: the final-reply duplicate check compares against; survives rollovers
     text_stream: str = ""
-    messages: dict[int, int] = field(default_factory=dict)  # chat_id -> live message
+    messages: dict[int, MessageId] = field(
+        default_factory=dict
+    )  # chat_id -> live message (or ref)
     sent_text: str = ""  # what the live message currently shows
     last_touch: float = 0.0  # monotonic of the last Telegram write
 

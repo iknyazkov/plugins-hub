@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from channelsrv import protocol
-from channelsrv.providers.base import CardButton
+from channelsrv.providers.base import CardButton, MessageId
 from channelsrv.server import Core
 
 PREFIX = "ap:"
@@ -22,7 +22,7 @@ DETAILS_LIMIT = 1000
 @dataclass
 class _Pending:
     agent_id: str
-    messages: list[tuple[int, int | None]]  # (chat_id, message_id)
+    messages: list[tuple[int, MessageId | None]]  # (chat_id, message_id or ref)
 
 
 @dataclass
@@ -40,15 +40,21 @@ class Feature:
             if details:
                 text += f"\n\n```\n{details[:DETAILS_LIMIT]}\n```"
             approval_id = f"a{next(self._seq)}"
-            buttons = [[
-                CardButton("✅ Yes", f"{PREFIX}{approval_id}:y"),
-                CardButton("❌ No", f"{PREFIX}{approval_id}:n"),
-            ]]
+            buttons = [
+                [
+                    CardButton("✅ Yes", f"{PREFIX}{approval_id}:y"),
+                    CardButton("❌ No", f"{PREFIX}{approval_id}:n"),
+                ]
+            ]
             chats = core.state.chats_for_agent(agent.id) or core.state.chat_ids()
             if not chats:
                 raise protocol.ProtocolError("no known chats — message the bot first")
             messages = [
-                (chat_id, await core.provider.send_card(chat_id, text, buttons)) for chat_id in chats
+                (
+                    chat_id,
+                    await core.provider.send_card(chat_id, text, buttons, instant=True),
+                )
+                for chat_id in chats
             ]
             self._pending[approval_id] = _Pending(agent_id=agent.id, messages=messages)
             return protocol.ok(approval_id=approval_id)
@@ -75,7 +81,9 @@ class Feature:
                 )
             for msg_chat, message_id in pending.messages:
                 if message_id is not None:
-                    await core.provider.edit_text(msg_chat, message_id, f"{mark} `{approval_id}`")
+                    await core.provider.edit_text(
+                        msg_chat, message_id, f"{mark} `{approval_id}`", instant=True
+                    )
 
         core.add_op(protocol.OP_APPROVAL_REQUEST, request)
         core.add_callback(PREFIX, answer)

@@ -31,7 +31,7 @@ from telegram.ext import (
 from telegram.request import HTTPXRequest
 
 from channelsrv import formatting
-from channelsrv.providers.base import CardButton
+from channelsrv.providers.base import CardButton, MessageId
 from channelsrv.server import Core
 
 log = logging.getLogger(__name__)
@@ -118,8 +118,7 @@ class PollWatchdog:
                 return
             self._restarts += 1
             log.error(
-                "getUpdates silent for %.0fs — restarting polling "
-                "(attempt %d/%d)",
+                "getUpdates silent for %.0fs — restarting polling (attempt %d/%d)",
                 silent,
                 self._restarts,
                 self._restart_limit,
@@ -146,7 +145,9 @@ class TelegramProvider:
             write_timeout=POLLING_TIMEOUT,
             pool_timeout=POLLING_TIMEOUT,
         )
-        builder = ApplicationBuilder().token(token).get_updates_request(self._poll_request)
+        builder = (
+            ApplicationBuilder().token(token).get_updates_request(self._poll_request)
+        )
         if proxy_url:
             builder = builder.proxy(proxy_url)
         self._app = builder.build()
@@ -163,7 +164,9 @@ class TelegramProvider:
         """Attach the core: wiring without constructor cycles."""
         self._core = core
         self._app.add_handler(MessageHandler(filters.COMMAND, self._on_command))
-        self._app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self._on_text))
+        self._app.add_handler(
+            MessageHandler(filters.TEXT & ~filters.COMMAND, self._on_text)
+        )
         self._app.add_handler(CallbackQueryHandler(self._on_callback))
 
     # -------------------------------------------------------------- lifecycle
@@ -213,7 +216,9 @@ class TelegramProvider:
         chat = update.effective_chat
         return (core, chat.id) if chat is not None else None
 
-    async def _on_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def _on_command(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
         gate = self._gate(update)
         message = update.effective_message
         if gate is None or message is None:
@@ -224,7 +229,9 @@ class TelegramProvider:
             command, rest = parsed
             await core.on_command(chat_id, command, rest)
 
-    async def _on_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def _on_text(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
         gate = self._gate(update)
         message = update.effective_message
         if gate is None or message is None:
@@ -232,7 +239,9 @@ class TelegramProvider:
         core, chat_id = gate
         await core.on_text(chat_id, message.text or "")
 
-    async def _on_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def _on_callback(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
         gate = self._gate(update)
         query = update.callback_query
         if gate is None or query is None:
@@ -244,7 +253,11 @@ class TelegramProvider:
     # --------------------------------------------------------------- outbound
 
     async def send_text(
-        self, chat_id: int, markdown: str, agent_name: str | None = None
+        self,
+        chat_id: int,
+        markdown: str,
+        agent_name: str | None = None,
+        instant: bool = False,  # lanes are the outbox's business, not ours
     ) -> None:
         chunks = formatting.split_markdown(markdown)
         if agent_name is not None:
@@ -254,7 +267,11 @@ class TelegramProvider:
             await self._app.bot.send_message(chat_id, text, entities=entities)
 
     async def send_card(
-        self, chat_id: int, markdown: str, buttons: Sequence[Sequence[CardButton]]
+        self,
+        chat_id: int,
+        markdown: str,
+        buttons: Sequence[Sequence[CardButton]],
+        instant: bool = False,  # lanes are the outbox's business, not ours
     ) -> int | None:
         text, entities = formatting.render(markdown)
         message = await self._app.bot.send_message(
@@ -266,7 +283,11 @@ class TelegramProvider:
         message_id: int = message.message_id
         return message_id
 
-    async def edit_text(self, chat_id: int, message_id: int, markdown: str) -> None:
+    async def edit_text(
+        self, chat_id: int, message_id: MessageId, markdown: str, instant: bool = False
+    ) -> None:
+        # the outbox worker resolves refs before calling; here it is an int
+        assert isinstance(message_id, int)
         text, entities = formatting.render(markdown)
         await self._app.bot.edit_message_text(
             chat_id=chat_id, message_id=message_id, text=text, entities=entities

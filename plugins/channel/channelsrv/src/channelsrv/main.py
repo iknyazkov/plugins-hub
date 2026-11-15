@@ -16,9 +16,12 @@ import signal
 import sys
 from pathlib import Path
 
+from telegram.error import BadRequest, Forbidden
+
 from channelsrv import config
 from channelsrv.config import Config, ConfigError
 from channelsrv.features import MENU, background_tasks, register_all
+from channelsrv.outbox import OutboxProvider
 from channelsrv.providers.telegram import TelegramProvider
 from channelsrv.registry import Registry
 from channelsrv.server import Core, JsonlServer
@@ -87,7 +90,14 @@ async def serve(cfg: Config, base: Path) -> None:
     stop = asyncio.Event()
     # a fatal from the polling watchdog must go through the same clean
     # shutdown path as a signal: unlink the socket and pidfile on the way out
-    provider = TelegramProvider(token=cfg.token, proxy_url=cfg.proxy_url, on_fatal=stop.set)
+    telegram = TelegramProvider(
+        token=cfg.token, proxy_url=cfg.proxy_url, on_fatal=stop.set
+    )
+    # every user-bound send funnels through the outbox: enqueues are
+    # instant, one worker delivers with retries — a flapping proxy delays
+    # messages instead of eating them. BadRequest/Forbidden are ours
+    # forever (malformed message, blocked chat): drop instead of retry.
+    provider = OutboxProvider(telegram, permanent=(BadRequest, Forbidden))
     state = StateStore(base / "state.json")
     state.load()
     core = Core(config=cfg, registry=Registry(), state=state, provider=provider)

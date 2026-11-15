@@ -17,15 +17,19 @@ class Feature:
         async def passthrough(chat_id: int, rest: str) -> None:
             agent = core.active_agent(chat_id)
             if agent is None:
-                await core.provider.send_text(chat_id, core.select_hint)
+                await core.provider.send_text(chat_id, core.select_hint, instant=True)
                 return
             text = rest.strip()
             if not text:
-                await core.provider.send_text(chat_id, "Usage: /command <command for the agent>")
+                await core.provider.send_text(
+                    chat_id, "Usage: /command <command for the agent>", instant=True
+                )
                 return
             if agent.tmux_target is None:
                 await core.provider.send_text(
-                    chat_id, "The active agent has no pane — it reads events, not keystrokes."
+                    chat_id,
+                    "The active agent has no pane — it reads events, not keystrokes.",
+                    instant=True,
                 )
                 return
             await core.deliver(agent.tmux_target, text)

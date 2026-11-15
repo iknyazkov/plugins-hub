@@ -19,16 +19,18 @@ from channelsrv.server import Core
 
 #: Typographic quotes count as quotes: mobile keyboards (Telegram included)
 #: silently replace straight ones with these when the message is typed.
-_QUOTES = str.maketrans({
-    "\u00ab": '"',  # « » guillemets
-    "\u00bb": '"',
-    "\u201c": '"',  # curly double quotes
-    "\u201d": '"',
-    "\u201e": '"',
-    "\u201f": '"',
-    "\u2018": "'",  # curly single quotes
-    "\u2019": "'",
-})
+_QUOTES = str.maketrans(
+    {
+        "\u00ab": '"',  # « » guillemets
+        "\u00bb": '"',
+        "\u201c": '"',  # curly double quotes
+        "\u201d": '"',
+        "\u201e": '"',
+        "\u201f": '"',
+        "\u2018": "'",  # curly single quotes
+        "\u2019": "'",
+    }
+)
 
 
 def _split_args(rest: str) -> list[str]:
@@ -62,30 +64,38 @@ class Feature:
                     "Examples:\n\n"
                     "/new claude work ~/Documents/plugins-hub\n"
                     '/new "my claude" work ~/Documents/plugins-hub',
+                    instant=True,
                 )
                 return
             command, name, raw_path = parts
             path = os.path.expanduser(raw_path)
             if not os.path.isabs(path):
                 await core.provider.send_text(
-                    chat_id, f"Path must be absolute (got {raw_path!r}) — use the ~/… form."
+                    chat_id,
+                    f"Path must be absolute (got {raw_path!r}) — use the ~/… form.",
+                    instant=True,
                 )
                 return
             if not os.path.isdir(path):
-                await core.provider.send_text(chat_id, f"No such directory: {path}")
+                await core.provider.send_text(
+                    chat_id, f"No such directory: {path}", instant=True
+                )
                 return
             try:
                 await self._new(name, command, path)
             except ValueError as exc:
-                await core.provider.send_text(chat_id, str(exc))
+                await core.provider.send_text(chat_id, str(exc), instant=True)
                 return
             except Exception as exc:  # noqa: BLE001 — tmux failures are answerable, not fatal
-                await core.provider.send_text(chat_id, f"tmux failed: {exc}")
+                await core.provider.send_text(
+                    chat_id, f"tmux failed: {exc}", instant=True
+                )
                 return
             await core.provider.send_text(
                 chat_id,
                 f"Spawned `{name}` in `{path}`. It registers itself as an agent in a "
                 f"moment; attach locally: `tmux attach -t {name}`",
+                instant=True,
             )
 
         async def close(chat_id: int, rest: str) -> None:
@@ -96,17 +106,20 @@ class Feature:
                     "Usage: /close <session name>\n\n"
                     "Kills the tmux session; its agents drop out of /agents "
                     "within seconds. Example:\n\n/close work",
+                    instant=True,
                 )
                 return
             try:
                 await self._close(name)
             except ValueError as exc:
-                await core.provider.send_text(chat_id, str(exc))
+                await core.provider.send_text(chat_id, str(exc), instant=True)
                 return
             except Exception as exc:  # noqa: BLE001
-                await core.provider.send_text(chat_id, f"tmux failed: {exc}")
+                await core.provider.send_text(
+                    chat_id, f"tmux failed: {exc}", instant=True
+                )
                 return
-            await core.provider.send_text(chat_id, f"Closed `{name}`.")
+            await core.provider.send_text(chat_id, f"Closed `{name}`.", instant=True)
 
         core.add_command("new", new)
         core.add_command("close", close)

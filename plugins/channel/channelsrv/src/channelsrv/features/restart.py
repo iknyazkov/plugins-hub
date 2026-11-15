@@ -46,15 +46,22 @@ class Feature:
     def register(self, core: Core) -> None:
         async def restart(chat_id: int, rest: str) -> None:
             await core.provider.send_text(
-                chat_id, "Restarting the daemon — back in a few seconds."
+                chat_id, "Restarting the daemon — back in a few seconds.", instant=True
             )
             try:
                 self._spawn()
             except OSError as exc:  # e.g. uv not found — stay alive, say why
                 await core.provider.send_text(
-                    chat_id, f"restart failed: {exc.__class__.__name__}: {exc}"
+                    chat_id,
+                    f"restart failed: {exc.__class__.__name__}: {exc}",
+                    instant=True,
                 )
                 return
+            # the queue is in-memory and dies with the process — give every
+            # waiting item (the goodbye above included) one last shot now
+            outbox = getattr(core.provider, "outbox", None)
+            if outbox is not None:
+                await outbox.flush()
             self._exiter(0)
 
         core.add_command("restart", restart)

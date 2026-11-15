@@ -23,18 +23,21 @@ class Feature:
         async def context(chat_id: int, rest: str) -> None:
             agent = core.active_agent(chat_id)
             if agent is None:
-                await core.provider.send_text(chat_id, core.select_hint)
+                await core.provider.send_text(chat_id, core.select_hint, instant=True)
                 return
             usage = agent.context
             if usage is None:
                 await core.provider.send_text(
-                    chat_id, "No context data yet — the agent hasn't finished a turn."
+                    chat_id,
+                    "No context data yet — the agent hasn't finished a turn.",
+                    instant=True,
                 )
                 return
             await core.provider.send_text(
                 chat_id,
                 f"ctx {_fmt_tokens(usage['input'])} in · "
                 f"{_fmt_tokens(usage['output'])} out (last turn)",
+                instant=True,
             )
 
         core.add_command("context", context)

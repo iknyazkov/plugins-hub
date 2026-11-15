@@ -240,3 +240,41 @@ messages typed while the daemon is down are still dropped
 (`drop_pending_updates`), the note just says so. A claude pane whose plugin
 hooks are gone would still be adopted — accepted, since the plugin is
 installed user-level and hooks fire in every session anyway.
+
+## ADR-0014 — Outbox: every user-bound send goes through one queue
+
+**Status:** accepted (decided 2026-11-15, recorded 2026-11-15)
+
+**Context:** replies were sent inline from the op handler — best-effort,
+two attempts. A flapping SOCKS proxy (2026-11-15, two replies lost over a
+33-minute outage) ate final answers silently: inbound survives because
+Telegram queues updates server-side and the daemon pulls; outbound was a
+push with no queue anywhere.
+
+**Decision:** one in-memory outbox in the daemon. Producers enqueue and
+never block; a single worker delivers in per-lane FIFO order. Lanes:
+`instant` (replies to user actions — commands, buttons — flagged manually
+at the call site, rule: "a direct answer to a user action") drains first;
+`normal` (agent final replies, progress chains, scheduled cron output).
+Retry per item: five fast attempts at 1→2→4→8→16 s, then every 60 s
+forever; known-permanent rejections (BadRequest/Forbidden — our malformed
+message) drop with an ERROR log instead of retrying. `typing` never queues
+and is suppressed while the queue is non-empty (a stale indicator lies).
+`send_card` returns a `MsgRef` resolved by the worker; edits target refs
+and are dropped if the create died. `/restart` gives every item one last
+no-backoff shot (`flush`) before the queue dies with the process. The
+queue is deliberately in-memory: no disk sync, a restart loses what was
+still waiting — accepted as over-engineering for a personal daemon.
+`/status` shows `outbox: N` when non-empty.
+
+**Consequences:** a proxy outage now delays messages instead of eating
+them; enqueue-order ≠ delivery-order across lanes (accepted); no edit
+coalescing for now — a long outage during active streaming drains as a
+burst rate-limited by 429s (revisit if it hurts); chunked `send_text`
+re-sends earlier chunks if a later one fails (at-least-once, accepted).
+
+**Alternatives considered:** persistent on-disk outbox — rejected (sync
+complexity for ~0.01% cases, owner's call); retry-then-drop after ~31 s —
+rejected: the incident class is precisely the outage longer than that;
+hook-side spool for a dead daemon socket — rejected: a second queue with
+its own duplicate surface.

@@ -7,7 +7,12 @@ from channelsrv.server import Core
 
 
 def _line(agent: Agent) -> str:
-    parts = [f"**{agent.name}**", agent.session_name, f"mode: {agent.mode or '—'}", agent.status]
+    parts = [
+        f"**{agent.name}**",
+        agent.session_name,
+        f"mode: {agent.mode or '—'}",
+        agent.status,
+    ]
     if agent.detail:
         parts[3] += f" ({agent.detail})"
     return " · ".join(parts)
@@ -18,9 +23,19 @@ class Feature:
         async def status(chat_id: int, rest: str) -> None:
             agents = core.registry.snapshot()
             if not agents:
-                await core.provider.send_text(chat_id, "No agents — start a session with the plugin.")
+                await core.provider.send_text(
+                    chat_id,
+                    "No agents — start a session with the plugin.",
+                    instant=True,
+                )
                 return
-            lines = ["**Agents:**", *(f"{i}. {_line(a)}" for i, a in enumerate(agents, 1))]
-            await core.provider.send_text(chat_id, "\n".join(lines))
+            lines = [
+                "**Agents:**",
+                *(f"{i}. {_line(a)}" for i, a in enumerate(agents, 1)),
+            ]
+            outbox = getattr(core.provider, "outbox", None)  # tests inject bare fakes
+            if outbox is not None and outbox.depth:
+                lines.append(f"outbox: {outbox.depth}")
+            await core.provider.send_text(chat_id, "\n".join(lines), instant=True)
 
         core.add_command("status", status)

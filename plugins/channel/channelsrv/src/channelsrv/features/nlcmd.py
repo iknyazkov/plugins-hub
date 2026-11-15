@@ -70,11 +70,13 @@ class Feature:
         core = self._core
         assert core is not None
         if self._busy:
-            await core.provider.send_text(chat_id, "Busy — one conversion at a time.")
+            await core.provider.send_text(
+                chat_id, "Busy — one conversion at a time.", instant=True
+            )
             return
         if not text.strip():
             await core.provider.send_text(
-                chat_id, "Usage: pass a request in plain words"
+                chat_id, "Usage: pass a request in plain words", instant=True
             )
             return
         self._busy = True
@@ -85,7 +87,9 @@ class Feature:
             try:
                 await self._new(session, agent_command(), cwd)
             except Exception as exc:  # noqa: BLE001 — answerable, not fatal
-                await core.provider.send_text(chat_id, f"spawn failed: {exc}")
+                await core.provider.send_text(
+                    chat_id, f"spawn failed: {exc}", instant=True
+                )
                 return
             agent = await self._wait_registered(session)
             if agent is None or not agent.tmux_target:
@@ -95,19 +99,23 @@ class Feature:
                         "converter session died immediately — the agent command is "
                         "failing (check CHANNEL_AI_AGENT)"
                     )
-                await core.provider.send_text(chat_id, f"{reason} — closing it")
+                await core.provider.send_text(
+                    chat_id, f"{reason} — closing it", instant=True
+                )
                 return
             agent.service = True
             cursor = 0
             await core.deliver(agent.tmux_target, f"{prompt}\n\nRequest: {text}")
             reply = await self._wait_reply(agent, cursor)
             if reply is None:
-                await core.provider.send_text(chat_id, "converter did not answer in time")
+                await core.provider.send_text(
+                    chat_id, "converter did not answer in time", instant=True
+                )
                 return
             reply = reply.strip()
             if not reply.startswith("/"):
                 # the converter refused or asked for details — pass it through
-                await core.provider.send_text(chat_id, reply[:1000])
+                await core.provider.send_text(chat_id, reply[:1000], instant=True)
                 return
             word, _, rest = reply[1:].partition(" ")
             await core.on_command(chat_id, word.lower(), rest.strip())

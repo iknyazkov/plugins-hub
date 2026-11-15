@@ -358,6 +358,7 @@ class Feature:
             "«сегодня в 18:00») run once and remove themselves.\n"
             "Example:\n\n"
             "/cron add every morning at 9 check the build in ~/work/api and report",
+            instant=True,
         )
 
     async def _add(self, chat_id: int, arg: str) -> None:
@@ -366,10 +367,13 @@ class Feature:
                 chat_id,
                 "Usage: /cron add <what the agent should do and how often>\n\n"
                 "Example:\n/cron add every workday at 18 summarize today's commits",
+                instant=True,
             )
             return
         if self._convert is None:
-            await self._core.provider.send_text(chat_id, "NL conversion is unavailable.")
+            await self._core.provider.send_text(
+                chat_id, "NL conversion is unavailable.", instant=True
+            )
             return
         now = self._now()
         await self._convert(
@@ -389,12 +393,15 @@ class Feature:
             await core.provider.send_text(
                 chat_id,
                 f"Job rejected: converter reply is not valid JSON.\nIt said: `{rest[:300]}`",
+                instant=True,
             )
             return
 
         name = data.get("name")
         if not isinstance(name, str) or len(name) > 40 or not NAME_RE.fullmatch(name):
-            await self._reject(chat_id, rest, "name must be kebab-case, latin, <= 40 chars")
+            await self._reject(
+                chat_id, rest, "name must be kebab-case, latin, <= 40 chars"
+            )
             return
         raw_cron = data.get("cron")
         raw_at = data.get("at")
@@ -409,7 +416,9 @@ class Feature:
         cron = ""
         if raw_cron is not None:
             if not isinstance(raw_cron, str) or parse_cron(raw_cron) is None:
-                await self._reject(chat_id, rest, "cron must be a valid 5-field numeric expression")
+                await self._reject(
+                    chat_id, rest, "cron must be a valid 5-field numeric expression"
+                )
                 return
             cron = raw_cron
             parsed = parse_cron(cron)
@@ -438,7 +447,9 @@ class Feature:
         elif isinstance(raw_cwd, str):
             cwd = os.path.expanduser(raw_cwd)
             if not os.path.isabs(cwd) or not os.path.isdir(cwd):
-                await self._reject(chat_id, rest, f"cwd is not an existing absolute dir: {raw_cwd!r}")
+                await self._reject(
+                    chat_id, rest, f"cwd is not an existing absolute dir: {raw_cwd!r}"
+                )
                 return
         else:
             await self._reject(chat_id, rest, "cwd must be a string")
@@ -453,7 +464,9 @@ class Feature:
             if not agent:
                 agent = ""
             elif "\n" in agent or len(agent) > 200:
-                await self._reject(chat_id, rest, "agent must be a single line, <= 200 chars")
+                await self._reject(
+                    chat_id, rest, "agent must be a single line, <= 200 chars"
+                )
                 return
 
         now = self._now()
@@ -472,7 +485,9 @@ class Feature:
         self._store.add(job)
         agent_text = f" · via `{job.agent}`" if job.agent else ""
         if job.at:
-            when_text = f"fires at {at_dt:%a %d %H:%M}" if at_dt is not None else "one-shot"
+            when_text = (
+                f"fires at {at_dt:%a %d %H:%M}" if at_dt is not None else "one-shot"
+            )
             head = f"at `{job.at}`"
         else:
             nxt = next_fire(parsed, now) if parsed is not None else None
@@ -484,11 +499,14 @@ class Feature:
             f"Created `{job.id}` ({kind})\n"
             f"{head}{agent_text} · {when_text} · cwd `{job.cwd}`\n"
             f"prompt: {job.prompt[:200]}{'…' if len(job.prompt) > 200 else ''}",
+            instant=True,
         )
 
     async def _reject(self, chat_id: int, rest: str, reason: str) -> None:
         await self._core.provider.send_text(
-            chat_id, f"Job rejected: {reason}.\nConverter said: `{rest[:300]}`"
+            chat_id,
+            f"Job rejected: {reason}.\nConverter said: `{rest[:300]}`",
+            instant=True,
         )
 
     def _default_cwd(self, chat_id: int) -> str:
@@ -503,7 +521,9 @@ class Feature:
         jobs = self._store.jobs()
         if not jobs:
             await self._core.provider.send_text(
-                chat_id, "No jobs. Add one: /cron add <what and how often, plain words>"
+                chat_id,
+                "No jobs. Add one: /cron add <what and how often, plain words>",
+                instant=True,
             )
             return
         now = self._now()
@@ -512,7 +532,11 @@ class Feature:
             agent_text = f" · via `{job.agent}`" if job.agent else ""
             if job.at:
                 at_dt = _parse_iso(job.at)
-                when_text = f"fires {at_dt:%a %d %H:%M}" if at_dt is not None else f"fires {job.at}"
+                when_text = (
+                    f"fires {at_dt:%a %d %H:%M}"
+                    if at_dt is not None
+                    else f"fires {job.at}"
+                )
                 head = f"`{job.id}` ({when_text}){agent_text}"
             else:
                 parsed = parse_cron(job.cron)
@@ -528,15 +552,19 @@ class Feature:
                 last_text = "last —"
             preview = job.prompt[:60] + ("…" if len(job.prompt) > 60 else "")
             blocks.append(f"{head} · {last_text}\n{preview}")
-        await self._core.provider.send_text(chat_id, f"{len(jobs)} job(s):\n\n" + "\n\n".join(blocks))
+        await self._core.provider.send_text(
+            chat_id, f"{len(jobs)} job(s):\n\n" + "\n\n".join(blocks), instant=True
+        )
 
     async def _remove(self, chat_id: int, arg: str) -> None:
         if not arg:
-            await self._core.provider.send_text(chat_id, "Usage: /cron remove <id or prefix>")
+            await self._core.provider.send_text(
+                chat_id, "Usage: /cron remove <id or prefix>", instant=True
+            )
             return
         job, error = self._resolve(arg)
         if job is None:
-            await self._core.provider.send_text(chat_id, error)
+            await self._core.provider.send_text(chat_id, error, instant=True)
             return
         task = self._runs.pop(job.id, None)
         if task is not None:
@@ -544,27 +572,37 @@ class Feature:
         assert self._store is not None
         self._store.remove(job.id)
         suffix = " (run cancelled)" if task is not None else ""
-        await self._core.provider.send_text(chat_id, f"Removed `{job.id}`{suffix}.")
+        await self._core.provider.send_text(
+            chat_id, f"Removed `{job.id}`{suffix}.", instant=True
+        )
 
     async def _run_cmd(self, chat_id: int, arg: str) -> None:
         if not arg:
-            await self._core.provider.send_text(chat_id, "Usage: /cron run <id or prefix>")
+            await self._core.provider.send_text(
+                chat_id, "Usage: /cron run <id or prefix>", instant=True
+            )
             return
         job, error = self._resolve(arg)
         if job is None:
-            await self._core.provider.send_text(chat_id, error)
+            await self._core.provider.send_text(chat_id, error, instant=True)
             return
         if job.id in self._runs:
-            await self._core.provider.send_text(chat_id, f"`{job.id}` is already running.")
+            await self._core.provider.send_text(
+                chat_id, f"`{job.id}` is already running.", instant=True
+            )
             return
         if len(self._runs) >= RUN_CAP:
             await self._core.provider.send_text(
-                chat_id, f"Run cap reached ({RUN_CAP} active) — try again later."
+                chat_id,
+                f"Run cap reached ({RUN_CAP} active) — try again later.",
+                instant=True,
             )
             return
         self._start(job)
         await self._core.provider.send_text(
-            chat_id, f"Started `{job.id}` — the result lands in the job's chat."
+            chat_id,
+            f"Started `{job.id}` — the result lands in the job's chat.",
+            instant=True,
         )
 
     # ------------------------------------------------------------- scheduler
@@ -626,7 +664,9 @@ class Feature:
                 await self._new(session, job.agent or agent_command(), job.cwd)
                 session_up = True
             except Exception as exc:  # noqa: BLE001 — answerable, not fatal
-                await self._report(job, "failed", error=f"spawn failed: {exc}", started=started)
+                await self._report(
+                    job, "failed", error=f"spawn failed: {exc}", started=started
+                )
                 return
             agent = await self._wait_registered(session)
             if agent is None or not agent.tmux_target:
@@ -671,13 +711,20 @@ class Feature:
         duration = _fmt_duration(time.monotonic() - started)
         assert self._store is not None
         self._store.set_last_run(
-            job.id, {"at": self._now().isoformat(timespec="seconds"), "status": status, "error": error}
+            job.id,
+            {
+                "at": self._now().isoformat(timespec="seconds"),
+                "status": status,
+                "error": error,
+            },
         )
         if reply is not None:
             text = f"[cron] {job.name} · {status} · {duration}\n\n{reply}"
         else:
             text = f"[cron] {job.name} · {status} · {duration}\n{error or ''}"
-        with contextlib.suppress(Exception):  # delivery is best-effort; last_run is kept
+        with contextlib.suppress(
+            Exception
+        ):  # delivery is best-effort; last_run is kept
             await self._core.provider.send_text(job.chat_id, text)
 
     async def _wait_registered(self, session: str) -> Any:

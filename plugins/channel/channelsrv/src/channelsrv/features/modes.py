@@ -15,16 +15,19 @@ class Feature:
         async def show(chat_id: int, rest: str) -> None:
             agent = core.active_agent(chat_id)
             if agent is None:
-                await core.provider.send_text(chat_id, core.select_hint)
+                await core.provider.send_text(chat_id, core.select_hint, instant=True)
                 return
             if not agent.modes:
-                await core.provider.send_text(chat_id, f"**{agent.name}** has no modes.")
+                await core.provider.send_text(
+                    chat_id, f"**{agent.name}** has no modes.", instant=True
+                )
                 return
             rows = [
-                [CardButton(("● " if m == agent.mode else "") + m, f"{PREFIX}{m}")] for m in agent.modes
+                [CardButton(("● " if m == agent.mode else "") + m, f"{PREFIX}{m}")]
+                for m in agent.modes
             ]
             title = f"**Mode · {agent.name}** · now: {agent.mode or '—'}"
-            await core.provider.send_card(chat_id, title, rows)
+            await core.provider.send_card(chat_id, title, rows, instant=True)
 
         async def set_mode(chat_id: int, mode: str) -> None:
             # KNOWN-ISSUE 2 (wiki/KNOWN_ISSUES.md): the event below is only
@@ -33,13 +36,15 @@ class Feature:
             # no-op for them.
             agent = core.active_agent(chat_id)
             if agent is None:
-                await core.provider.send_text(chat_id, core.select_hint)
+                await core.provider.send_text(chat_id, core.select_hint, instant=True)
                 return
             core.send_event(
                 agent.id,
                 {"type": protocol.EVENT_MODE_SET, "mode": mode, "chat_id": chat_id},
             )
-            await core.provider.send_text(chat_id, f"Mode **{mode}** sent to {agent.name}")
+            await core.provider.send_text(
+                chat_id, f"Mode **{mode}** sent to {agent.name}", instant=True
+            )
 
         core.add_command("mode", show)
         core.add_callback(PREFIX, set_mode)

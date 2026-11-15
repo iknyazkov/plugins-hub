@@ -50,7 +50,8 @@ class Core:
         events_timeout: float = 25.0,
         deliver: Callable[[str, str], Coroutine[Any, Any, None]] | None = None,
         pane_alive: Callable[[str], Coroutine[Any, Any, bool]] | None = None,
-        list_panes: Callable[[], Coroutine[Any, Any, list[dict[str, str]]]] | None = None,
+        list_panes: Callable[[], Coroutine[Any, Any, list[dict[str, str]]]]
+        | None = None,
     ) -> None:
         self.config = config
         self.registry = registry
@@ -102,16 +103,25 @@ class Core:
 
     async def _op_register(self, request: Mapping[str, Any]) -> dict[str, Any]:
         modes_raw = request.get("modes", [])
-        if not isinstance(modes_raw, list) or not all(isinstance(m, str) for m in modes_raw):
+        if not isinstance(modes_raw, list) or not all(
+            isinstance(m, str) for m in modes_raw
+        ):
             raise protocol.ProtocolError("field 'modes' must be a list of strings")
         tmux_target = protocol.opt_str(request, "tmux_target")
         if tmux_target:  # one pane = one agent: adoption may hold a ghost whose
             # derived id drifted from the hook's (a session that changed cwd)
             for other in self.registry.snapshot():
-                if other.tmux_target == tmux_target and other.id != request.get("agent_id"):
+                if other.tmux_target == tmux_target and other.id != request.get(
+                    "agent_id"
+                ):
                     self.registry.deregister(other.id)
                     self.state.drop_transcript(other.id)
-                    log.info("agent %s replaced by %s on pane %s", other.id, request.get("agent_id"), tmux_target)
+                    log.info(
+                        "agent %s replaced by %s on pane %s",
+                        other.id,
+                        request.get("agent_id"),
+                        tmux_target,
+                    )
         agent = self.registry.register(
             agent_id=protocol.req_str(request, "agent_id"),
             name=protocol.req_str(request, "name"),
@@ -122,10 +132,15 @@ class Core:
         )
         log.info(
             "agent registered: %s (%s), modes=%s, tmux=%s, transcript=%s",
-            agent.id, agent.name, agent.modes, agent.tmux_target,
+            agent.id,
+            agent.name,
+            agent.modes,
+            agent.tmux_target,
             "yes" if agent.transcript_path else "no",
         )
-        if agent.transcript_path:  # data for a post-restart re-attach to resume streaming
+        if (
+            agent.transcript_path
+        ):  # data for a post-restart re-attach to resume streaming
             self.state.set_transcript(agent.id, agent.transcript_path)
         self._start_tail(agent)  # a mid-turn re-registration must resume streaming
         return protocol.ok()
@@ -210,12 +225,19 @@ class Core:
                     await self.provider.send_card(chat_id, segment, [])
             tail.pending.clear()
         except Exception as exc:  # progress is cosmetic, never fatal — but visible
-            log.warning("progress pending write failed: %s: %s", exc.__class__.__name__, exc, exc_info=True)
+            log.warning(
+                "progress pending write failed: %s: %s",
+                exc.__class__.__name__,
+                exc,
+                exc_info=True,
+            )
             return
         text = tail.chain.text
         if not text or text == tail.sent_text:
             return
-        if agent.last_delivered and text.rstrip().endswith(agent.last_delivered.strip()):
+        if agent.last_delivered and text.rstrip().endswith(
+            agent.last_delivered.strip()
+        ):
             # the reply was already delivered as a message (streaming lagged
             # behind the Stop hook) — echoing it through the chain would
             # duplicate it; the chain message keeps its earlier partial text
@@ -232,7 +254,12 @@ class Core:
                 else:
                     await self.provider.edit_text(chat_id, message_id, text)
             except Exception as exc:  # progress is cosmetic, never fatal — but visible
-                log.warning("progress write failed: %s: %s", exc.__class__.__name__, exc, exc_info=True)
+                log.warning(
+                    "progress write failed: %s: %s",
+                    exc.__class__.__name__,
+                    exc,
+                    exc_info=True,
+                )
         tail.sent_text = text
         tail.last_touch = time.monotonic()
         log.info("progress: %d chars -> %d chat(s)", len(text), len(chats))
@@ -290,7 +317,9 @@ class Core:
                     cursor=pending[-1][0],
                 )
             agent.wakeup.clear()
-            if agent.events_after(cursor):  # second look after clear — do not sleep through a push
+            if agent.events_after(
+                cursor
+            ):  # second look after clear — do not sleep through a push
                 continue
             remaining = deadline - loop.time()
             if remaining <= 0:
@@ -318,9 +347,11 @@ class Core:
         self.state.note_chat(chat_id)
         agent = self.active_agent(chat_id)
         if agent is None:
-            await self.provider.send_text(chat_id, self.select_hint)
+            await self.provider.send_text(chat_id, self.select_hint, instant=True)
             return
-        agent.push({"type": protocol.EVENT_USER_MESSAGE, "chat_id": chat_id, "text": text})
+        agent.push(
+            {"type": protocol.EVENT_USER_MESSAGE, "chat_id": chat_id, "text": text}
+        )
         if agent.tmux_target is not None:
             # fire-and-forget: Telegram updates must not wait on tmux
             asyncio.create_task(self.deliver(agent.tmux_target, text))
@@ -376,7 +407,9 @@ class Core:
             agent_id = delivery.agent_id_for(pane["path"], pane["id"])
             agent = self.registry.register(
                 agent_id=agent_id,
-                name=delivery.agent_name_for(pane["session"] or None, pane["path"], pane["id"]),
+                name=delivery.agent_name_for(
+                    pane["session"] or None, pane["path"], pane["id"]
+                ),
                 session_name=pane["path"],
                 modes=[],
                 tmux_target=pane["id"],
@@ -436,7 +469,9 @@ class Core:
         if not chats:
             log.warning("message from %s has nowhere to go: no chats yet", agent_id)
             return
-        log.info("reply from %s: %d chars -> %d chat(s)", agent_id, len(text), len(chats))
+        log.info(
+            "reply from %s: %d chars -> %d chat(s)", agent_id, len(text), len(chats)
+        )
         agent.last_delivered = text
         for chat_id in chats:
             await self.provider.send_text(chat_id, text, agent_name=agent.name)
@@ -523,7 +558,9 @@ class JsonlServer:
             if task is not None:
                 task.cancel()
 
-    async def _handle_conn(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    async def _handle_conn(
+        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
         try:
             line = await reader.readline()
             try:
@@ -531,7 +568,9 @@ class JsonlServer:
             except ValueError:
                 request = None
             if not isinstance(request, dict):
-                response = protocol.fail("malformed frame: expected a single JSON object line")
+                response = protocol.fail(
+                    "malformed frame: expected a single JSON object line"
+                )
             else:
                 response = await self._core.handle(request)
             writer.write((json.dumps(response, ensure_ascii=False) + "\n").encode())

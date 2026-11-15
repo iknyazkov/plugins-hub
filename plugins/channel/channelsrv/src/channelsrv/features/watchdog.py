@@ -53,21 +53,35 @@ def load_signatures(path: Path | None = None) -> tuple[Signature, ...]:
     """Parses the registry once at startup; malformed entries abort the start."""
     raw: Any = json.loads((path or SIGNATURES_FILE).read_text())
     if not isinstance(raw, list) or not raw:
-        raise ValueError(f"{SIGNATURES_FILE.name}: expected a non-empty list of entries")
+        raise ValueError(
+            f"{SIGNATURES_FILE.name}: expected a non-empty list of entries"
+        )
     signatures: list[Signature] = []
     for entry in raw:
         if not isinstance(entry, dict):
-            raise TypeError(f"{SIGNATURES_FILE.name}: entry is not an object: {entry!r}")
+            raise TypeError(
+                f"{SIGNATURES_FILE.name}: entry is not an object: {entry!r}"
+            )
         sig_id = entry.get("id")
         matches, keys = entry.get("match"), entry.get("keys")
         if not sig_id or not isinstance(matches, list) or not matches:
-            raise ValueError(f"{SIGNATURES_FILE.name}: {sig_id!r} needs id and non-empty match")
-        if not isinstance(keys, list) or not keys or not all(isinstance(k, str) for k in keys):
-            raise ValueError(f"{SIGNATURES_FILE.name}: {sig_id!r} needs non-empty string keys")
+            raise ValueError(
+                f"{SIGNATURES_FILE.name}: {sig_id!r} needs id and non-empty match"
+            )
+        if (
+            not isinstance(keys, list)
+            or not keys
+            or not all(isinstance(k, str) for k in keys)
+        ):
+            raise ValueError(
+                f"{SIGNATURES_FILE.name}: {sig_id!r} needs non-empty string keys"
+            )
         try:
             patterns = tuple(re.compile(m) for m in matches if isinstance(m, str))
         except re.error as exc:
-            raise ValueError(f"{SIGNATURES_FILE.name}: {sig_id!r} has a broken regex: {exc}") from exc
+            raise ValueError(
+                f"{SIGNATURES_FILE.name}: {sig_id!r} has a broken regex: {exc}"
+            ) from exc
         signatures.append(Signature(id=sig_id, patterns=patterns, keys=tuple(keys)))
     return tuple(signatures)
 
@@ -84,7 +98,9 @@ class Feature:
         self._signatures = signatures
         self._core: Core
         self._prev: dict[str, str] = {}  # tmux_target -> last seen screen
-        self._presses: dict[str, int] = {}  # tmux_target -> presses on this unchanged screen
+        self._presses: dict[
+            str, int
+        ] = {}  # tmux_target -> presses on this unchanged screen
 
     def register(self, core: Core) -> None:
         self._core = core
@@ -138,14 +154,22 @@ class Feature:
     async def _screen_command(self, chat_id: int, rest: str) -> None:
         agent = self._core.active_agent(chat_id)
         if agent is None:
-            await self._core.provider.send_text(chat_id, self._core.select_hint)
+            await self._core.provider.send_text(
+                chat_id, self._core.select_hint, instant=True
+            )
             return
         if agent.tmux_target is None:
-            await self._core.provider.send_text(chat_id, f"`{agent.name}` has no tmux pane.")
+            await self._core.provider.send_text(
+                chat_id, f"`{agent.name}` has no tmux pane.", instant=True
+            )
             return
         try:
             screen = await self._capture(agent.tmux_target)
         except Exception as exc:  # noqa: BLE001 — tmux failures are answerable, not fatal
-            await self._core.provider.send_text(chat_id, f"capture failed: {exc}")
+            await self._core.provider.send_text(
+                chat_id, f"capture failed: {exc}", instant=True
+            )
             return
-        await self._core.provider.send_text(chat_id, f"```\n{screen}\n```")
+        await self._core.provider.send_text(
+            chat_id, f"```\n{screen}\n```", instant=True
+        )
