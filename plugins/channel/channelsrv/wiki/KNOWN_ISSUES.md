@@ -24,3 +24,12 @@ agents that do have modes, tapping a button replies "Mode **X** sent to
 and deliver `mode_set` to tmux panes like a user message (paste a line the
 agent session understands as a mode switch).
 
+
+## Progress-chain edit accepted but invisible (2026-11-15, open)
+
+`progress: 2897 chars` logged at 16:10:51 with no warning — the API call
+succeeded — yet the message the user sees never contained the edited text
+(summary turn of the outbox design session). Not reproduced since. Finals
+no longer depend on chain edits (ADR-0015), so the class is defused; if
+it reproduces in the chain itself, suspect `tail.messages` pointing at a
+stale/rolled message id (`progress.py`, `drain_chunks` rollover path).

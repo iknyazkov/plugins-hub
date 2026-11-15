@@ -163,7 +163,6 @@ class Core:
         agent.detail = protocol.opt_str(request, "detail")
         if status == protocol.STATUS_THINKING:
             agent.thinking_since = time.monotonic()
-            agent.last_turn_text = None  # a new turn owns its own stream
             agent.last_delivered = None
         else:
             agent.thinking_since = None
@@ -197,7 +196,6 @@ class Core:
         tail, agent.tail = agent.tail, None
         if tail is not None:
             progress.drain_chunks(tail)  # the close flush skips the throttle
-            agent.last_turn_text = tail.text_stream  # a late Stop message still dedups
             await self._write_progress(agent, tail)
 
     async def progress_once(self) -> None:
@@ -276,18 +274,15 @@ class Core:
         agent = self.live_agent(request)
         text = protocol.req_str(request, "text")
         if agent.tail is not None:
-            progress.drain_chunks(agent.tail)
-            covered = progress.chain_covers(agent.tail, text)
-        else:
-            covered = False
-        # the closed turn's stream: a Stop message op can arrive after
-        # close_turn dropped the tail — live_agent then re-opens a fresh,
-        # empty tail, so the saved stream is the only witness
-        if not covered and progress.stream_covers(agent.last_turn_text or "", text):
-            covered = True
-        if covered:
-            log.info("progress: final already streamed — duplicate skipped")
-            return protocol.ok()
+            progress.drain_chunks(agent.tail)  # the chain catches up before
+            # the echo check below (a chain edit may still be in flight)
+        # The final ALWAYS goes out as its own message. Folding it into the
+        # live chain message (the old duplicate-skip) delivered it as a
+        # silent edit: no notification, buried under newer traffic, and at
+        # least once the accepted edit never showed up where the user
+        # reads — the reply was "lost" while every log said delivered
+        # (ADR-0015). The chain may repeat the final's text in its last
+        # segment; a visible duplicate is cheaper than an invisible reply.
         await self.deliver_from_agent(agent.id, text)
         return protocol.ok()
 

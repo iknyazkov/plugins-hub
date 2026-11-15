@@ -40,7 +40,6 @@ class Agent:
     context: dict[str, int] | None = None
     #: the closed turn's streamed text — duplicate check for a Stop message op
     #: that arrives after close_turn dropped the tail (reset at the next turn start)
-    last_turn_text: str | None = None
     #: the last reply actually delivered to chats — the close flush must not
     #: echo it back through the chain if streaming caught up late
     last_delivered: str | None = None
@@ -97,7 +96,9 @@ class Registry:
             service=service,
             last_seen=self._clock(),
         )
-        self._agents[agent_id] = agent  # re-registration replaces, no history carried over
+        self._agents[agent_id] = (
+            agent  # re-registration replaces, no history carried over
+        )
         return agent
 
     def deregister(self, agent_id: str) -> bool:
@@ -125,7 +126,10 @@ class Registry:
         for agent in self._agents.values():
             if agent.tmux_target is not None:
                 continue
-            if agent.status != protocol.STATUS_OFFLINE and now - agent.last_seen > grace:
+            if (
+                agent.status != protocol.STATUS_OFFLINE
+                and now - agent.last_seen > grace
+            ):
                 agent.status = protocol.STATUS_OFFLINE
                 offlined.append(agent.id)
         return offlined

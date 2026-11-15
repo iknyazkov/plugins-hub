@@ -278,3 +278,34 @@ complexity for ~0.01% cases, owner's call); retry-then-drop after ~31 s —
 rejected: the incident class is precisely the outage longer than that;
 hook-side spool for a dead daemon socket — rejected: a second queue with
 its own duplicate surface.
+
+## ADR-0015 — Final replies are always fresh messages
+
+**Status:** accepted (decided 2026-11-15, recorded 2026-11-15)
+
+**Context:** the Stop reply was skipped whenever the progress chain had
+already streamed the same text ("duplicate skipped", 0.1.30/0.1.31) — the
+chain edit was the delivery. On 2026-11-15 that edit, accepted by the API
+per every log line, never showed up where the user reads: the reply was
+"lost" while the daemon said delivered. Streaming edits are invisible by
+nature (no notification, buried under newer traffic) and once —
+unexplained — not visible at all.
+
+**Decision:** the Stop hook's reply always goes out as its own message,
+through the outbox (ADR-0014). The duplicate-skip machinery
+(`stream_covers`/`chain_covers`, `text_stream`, `last_turn_text`) is
+deleted. The chain may repeat the final's text in its last segment; a
+visible duplicate is cheaper than an invisible reply. The
+`last_delivered` echo check in `_write_progress` stays (the hook sends
+message before turn-end status, so close-time chain writes still
+suppress the echo after the fresh final).
+
+**Consequences:** finals ping; chain messages stay as the narration/⚙
+trail; supersede the dedup half of 0.1.30/0.1.31; regression test
+`test_final_always_fresh_message_even_when_chain_streamed_it` fails on
+the pre-fix code. The unexplained invisible edit stays in KNOWN_ISSUES.
+
+**Alternatives considered:** delete/collapse the chain message at Stop —
+rejected: losing the trail when a final never arrives (hook death) is
+worse than a duplicate; fix the edit-visibility bug instead — rejected:
+no reproduction, and finals no longer depend on chain edits.

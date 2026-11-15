@@ -149,6 +149,46 @@ async def test_agent_message_reaches_chat_with_name(world: SimpleNamespace) -> N
     assert world.provider.texts == [(42, "reply", "claude-1")]
 
 
+async def test_final_always_fresh_message_even_when_chain_streamed_it(
+    world: SimpleNamespace, tmp_path: Path
+) -> None:
+    """Incident 2026-11-15: the chain had streamed the full final text, the
+    Stop reply was "duplicate skipped" and left to a silent chain edit —
+    which the user never saw, while every log line said delivered. The final
+    must always go out as its own message; a visible duplicate in the chain
+    is cheaper than an invisible reply (ADR-0015). Fails on the pre-fix code.
+    """
+    transcript = tmp_path / "transcript.jsonl"
+    transcript.write_text("")
+    req = register_req("a1", name="claude-1")
+    req["transcript_path"] = str(transcript)
+    await call(world.sock, req)
+    await world.core.on_text(42, "hello")  # the chat became known
+    await call(world.sock, {"v": 1, "op": "status", "agent_id": "a1", "status": "thinking"})
+    # the turn streams its whole final text as an assistant block...
+    transcript.write_text(
+        json.dumps(
+            {
+                "type": "assistant",
+                "message": {"content": [{"type": "text", "text": "Дерево закрыто. Сводка…"}]},
+            }
+        )
+        + "\n"
+    )
+    agent = world.core.registry.get("a1")
+    assert agent is not None
+    await world.core.close_turn(agent)  # the chain catches up and shows it
+    assert world.provider.cards or world.provider.edits  # the chain carried the text
+    # ...and the Stop hook then reports the same text as the turn's reply
+    resp = await call(
+        world.sock,
+        {"v": 1, "op": "message", "agent_id": "a1", "text": "Дерево закрыто. Сводка…"},
+    )
+    assert resp["ok"] is True
+    # the reply is a message of its own — not folded into the chain
+    assert (42, "Дерево закрыто. Сводка…", "claude-1") in world.provider.texts
+
+
 async def test_thinking_after_chat_known(world: SimpleNamespace) -> None:
     await call(world.sock, register_req("a1"))
     await world.core.on_text(42, "hello")

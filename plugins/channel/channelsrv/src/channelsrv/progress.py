@@ -112,11 +112,6 @@ def _pieces(chunk: str) -> list[str]:
     ]
 
 
-#: how much of the turn's streamed text to remember for the duplicate check
-#: (a suffix match only needs the tail; Telegram finals sit far below this)
-STREAM_KEEP = 200_000
-
-
 @dataclass
 class TurnTail:
     """One agent's live-turn tail state; exists only while the turn runs."""
@@ -128,9 +123,6 @@ class TurnTail:
     #: segments closed before Telegram ever saw them (rollover within one
     #: throttle window) — they must still be sent, or their text is lost
     pending: list[str] = field(default_factory=list)
-    #: every text chunk streamed this turn (tool lines excluded) — the record
-    #: the final-reply duplicate check compares against; survives rollovers
-    text_stream: str = ""
     messages: dict[int, MessageId] = field(
         default_factory=dict
     )  # chat_id -> live message (or ref)
@@ -148,32 +140,9 @@ def drain_chunks(tail: TurnTail) -> None:
         for closed in closed_segments:
             if closed != tail.sent_text:  # already shown -> just abandon the message
                 tail.pending.append(closed)
-        if kind == "text":  # the turn's own record of what it streamed
-            joined = f"{tail.text_stream}\n\n{chunk}" if tail.text_stream else chunk
-            tail.text_stream = joined[-STREAM_KEEP:]
     if rolled:  # the live segment died: its message is abandoned, a new one follows
         tail.messages.clear()
         tail.sent_text = ""
-
-
-def stream_covers(stream: str, final_text: str) -> bool:
-    """True when the turn's text stream already carried the reply verbatim.
-
-    A suffix match: the Stop hook re-sends ``last_assistant_message``, which
-    the turn has streamed as its last text chunk — a verbatim tail means the
-    second copy would be pure duplication. Partial coverage is not coverage:
-    the full reply goes out (a self-contained final beats a shaved one).
-    """
-    text = final_text.strip()
-    if not text:
-        return False
-    stream = stream.rstrip()
-    return stream == text or stream.endswith(text)
-
-
-def chain_covers(tail: TurnTail, final_text: str) -> bool:
-    """stream_covers against the live tail's turn stream (drain the tail first)."""
-    return stream_covers(tail.text_stream, final_text)
 
 
 def read_new_chunks(tail: TurnTail) -> list[tuple[str, str]]:
