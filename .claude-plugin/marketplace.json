@@ -9,7 +9,7 @@
       "name": "grilling",
       "source": "./plugins/grilling",
       "description": "Grill the user relentlessly about a plan, decision, or idea via design-tree interview rounds.",
-      "version": "0.1.1"
+      "version": "0.1.2"
     },
     {
       "name": "code-migration",
