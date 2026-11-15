@@ -25,6 +25,18 @@ and deliver `mode_set` to tmux panes like a user message (paste a line the
 agent session understands as a mode switch).
 
 
+## Ghost re-stream of old transcript content (2026-11-16, FIXED in 0.1.34)
+
+The harness rewrites/compacts the session file; the tail's `size < offset`
+path reset the offset to zero and re-streamed the whole history into the
+chain — the user saw a prefixless duplicate of an old reply ("ghost").
+Fixed: on shrink, skip to the new end (`read_new_chunks`). Verified by
+`test_shrunk_transcript_is_skipped_not_reread` (failed on pre-fix code).
+Related same-night fix: `SEGMENT_LIMIT` 3900 → 3000 — rendered entity
+text runs longer than source markdown, and 3900-char segments drew
+`BadRequest Message_is_too_long` (three drops on 2026-11-15/16, now
+visible in logs thanks to the outbox).
+
 ## Progress-chain edit accepted but invisible (2026-11-15, open)
 
 `progress: 2897 chars` logged at 16:10:51 with no warning — the API call

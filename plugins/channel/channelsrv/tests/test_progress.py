@@ -323,3 +323,28 @@ async def test_delivered_reply_is_not_re_shown_by_the_chain(
     await idle(core)  # the close flush reads the entry — and must skip the echo
     assert provider.cards == []
     assert provider.edits == []
+
+
+# ------------------------------------------------- transcript rewrite (compaction)
+
+
+async def test_shrunk_transcript_is_skipped_not_reread(tmp_path: Path) -> None:
+    """Incident 2026-11-16: the harness rewrites/compacts the session file;
+    the old `size < offset -> read from zero` re-streamed the whole history
+    into the chain — the user saw a "ghost" duplicate of an old reply,
+    prefixless (chain messages carry no agent name). On shrink, skip to the
+    new end: rewritten history is old by definition, never new progress."""
+    transcript = tmp_path / "t.jsonl"
+    old = assistant_entry({"type": "text", "text": "Нашёл. Диагноз точный…"})
+    write_entry(transcript, old)
+    tail = progress.TurnTail(path=str(transcript))
+    progress.drain_chunks(tail)  # streamed once already
+    assert tail.chain.text  # something was read
+
+    # the harness compacts: the file is rewritten smaller, with fresh content
+    transcript.write_text(
+        json.dumps(assistant_entry({"type": "text", "text": "новая жизнь"})) + "\n"
+    )
+    chunks = progress.read_new_chunks(tail)
+    assert chunks == []  # the rewritten past is not progress — skipped
+    assert tail.offset == transcript.stat().st_size  # fast-forwarded to EOF

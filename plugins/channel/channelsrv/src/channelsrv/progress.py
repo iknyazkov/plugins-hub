@@ -19,8 +19,11 @@ from channelsrv.providers.base import MessageId
 PROGRESS_INTERVAL = 2.0
 #: minimum seconds between Telegram writes for one agent (edit rate limits)
 PROGRESS_THROTTLE = 2.5
-#: Telegram messages cap at 4096 chars — roll over before it
-SEGMENT_LIMIT = 3900
+#: Telegram messages cap at 4096 chars — roll over before it. The cap counts
+#: RENDERED text; entity-bearing markdown renders longer than its source
+#: (measured: a 3900-char segment drew BadRequest Message_is_too_long), so
+#: keep a real margin.
+SEGMENT_LIMIT = 3000
 #: visible length of a ``⚙ Tool(...)`` line
 TOOL_LINE_LIMIT = 80
 
@@ -146,13 +149,17 @@ def drain_chunks(tail: TurnTail) -> None:
 
 
 def read_new_chunks(tail: TurnTail) -> list[tuple[str, str]]:
-    """Drains the transcript tail; survives a missing or truncated file."""
+    """Drains the transcript tail; survives a missing or rewritten file."""
     try:
         with open(tail.path, "rb") as f:
             f.seek(0, 2)
             size = f.tell()
-            if size < tail.offset:  # truncated/rewritten — start over
-                tail.offset = 0
+            if size < tail.offset:  # rewritten/compacted by the harness —
+                # the past was replaced, and it is OLD: re-reading it would
+                # re-stream already-delivered content as prefixless ghosts
+                # (2026-11-16 incident). Skip to the new end; only what is
+                # appended from here on is progress.
+                tail.offset = size
                 tail.buf = b""
             f.seek(tail.offset)
             data = f.read()
