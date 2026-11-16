@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Sequence
 
@@ -301,3 +302,48 @@ async def test_outbox_provider_shape() -> None:
     assert door.outbox.depth == 1  # enqueued, not sent
     item = door.outbox._lanes["instant"][0]
     assert item.lane == "instant"
+
+
+# ------------------------------------------------- flush vs worker (the race)
+
+
+class GatedProvider(FakeProvider):
+    """send_text blocks mid-flight until the test releases it."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.entered = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def send_text(
+        self,
+        chat_id: int,
+        markdown: str,
+        agent_name: str | None = None,
+        instant: bool = False,
+    ) -> None:
+        self.entered.set()
+        await self.release.wait()
+        await super().send_text(chat_id, markdown, agent_name, instant)
+
+
+async def test_flush_is_the_only_deliverer_no_duplicate() -> None:
+    """Incident 2026-11-16 00:37: 'Restarting the daemon' arrived twice —
+    flush() iterated an item the worker was already mid-sending. flush must
+    make itself the single deliverer: stop the worker first, then drain.
+    Fails on the pre-fix code (two sends)."""
+    provider = GatedProvider()
+    box = Outbox(provider)
+    await box.start()
+    try:
+        box.send_text(CHAT, "Restarting the daemon — back in a few seconds.")
+        await provider.entered.wait()  # the worker holds the item mid-flight
+        flusher = asyncio.create_task(box.flush())
+        await asyncio.sleep(0.05)  # flush runs while the worker is stuck
+        provider.release.set()
+        await flusher
+        assert [t[1] for t in provider.texts] == ["Restarting the daemon — back in a few seconds."]
+        assert box.empty
+    finally:
+        provider.release.set()
+        await box.stop()

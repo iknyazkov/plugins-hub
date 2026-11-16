@@ -174,7 +174,12 @@ class Outbox:
         Used by /restart: the queue dies with the process seconds later, so
         every item gets a single no-backoff shot now; what still fails is
         lost with the restart (accepted — the queue is in-memory).
+        Single deliverer, always: the worker is stopped first — flush must
+        never race it for an item (2026-11-16: 'Restarting the daemon'
+        arrived twice, then the worker crashed on a double _remove). The
+        worker stays stopped; a live caller restarts it via start().
         """
+        await self.stop()
         for lane in (LANE_INSTANT, LANE_NORMAL):
             for item in list(self._lanes[lane]):
                 try:
