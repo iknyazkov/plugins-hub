@@ -342,8 +342,90 @@ async def test_flush_is_the_only_deliverer_no_duplicate() -> None:
         await asyncio.sleep(0.05)  # flush runs while the worker is stuck
         provider.release.set()
         await flusher
-        assert [t[1] for t in provider.texts] == ["Restarting the daemon — back in a few seconds."]
+        assert [t[1] for t in provider.texts] == [
+            "Restarting the daemon — back in a few seconds."
+        ]
         assert box.empty
     finally:
         provider.release.set()
         await box.stop()
+
+
+# ------------------------------------------------------------- chaos delivery
+
+import random
+
+
+async def test_chaos_delivery_exactly_once_no_loss(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Seeded chaos: random lanes, flaky network (20%), permanent
+    rejections (5%), clock jumps, flush/stop/start interleavings. The
+    invariants: every item is delivered exactly once or dropped-as-permanent
+    exactly once; nothing is lost to a retryable failure; the queue drains.
+    Deterministic — same seed, same scenario."""
+    rnd = random.Random(20261116)
+    outcomes: list[str | None] = []
+    for _ in range(4000):
+        roll = rnd.random()
+        outcomes.append("reject" if roll < 0.05 else "wobble" if roll < 0.25 else None)
+
+    class ChaosProvider(FakeProvider):
+        async def send_text(
+            self,
+            chat_id: int,
+            markdown: str,
+            agent_name: str | None = None,
+            instant: bool = False,
+        ) -> None:
+            spec = outcomes.pop() if outcomes else None
+            if spec == "reject":
+                raise DeadProvider.Rejected("never accepted")
+            if spec == "wobble":
+                raise FlakyProvider.Wobble("proxy flapped")
+            await super().send_text(chat_id, markdown, agent_name, instant)
+
+    provider = ChaosProvider()
+    clock = Clock()
+    box = Outbox(
+        provider,
+        permanent=(DeadProvider.Rejected,),
+        now=lambda: clock.now,
+        sleep=clock.sleep,
+    )
+    expected: list[str] = [f"msg-{i}" for i in range(300)]
+
+    with caplog.at_level(logging.ERROR):
+        for text in expected:  # enqueue all, mixing lanes
+            box.send_text(CHAT, text, instant=text.endswith(("0", "4", "8")))
+        for _ in range(3000):
+            roll = rnd.random()
+            if roll < 0.55:
+                item = box._pick_due()
+                if item is not None:
+                    await box._deliver(item)
+            elif roll < 0.75:
+                clock.t += rnd.uniform(1.0, 120.0)  # time passes
+            elif roll < 0.90:
+                continue
+            elif roll < 0.96:  # a restart-like drain, then back to work
+                await box.flush()
+                await box.start()
+            if box.empty:
+                break
+        for _ in range(20000):  # drain: retries must converge
+            if box.empty:
+                break
+            clock.t += 61.0
+            item = box._pick_due()
+            if item is not None:
+                await box._deliver(item)
+
+    assert box.empty, "queue must drain under retryable failures"
+    delivered = [t[1] for t in provider.texts]
+    dropped = {
+        m for r in caplog.records for m in expected if f"'{m}'" in r.getMessage()
+    }
+    assert len(delivered) == len(set(delivered)), "no message delivered twice"
+    assert set(delivered) | dropped == set(expected), "nothing silently lost"
+    assert not (set(delivered) & dropped), "a drop and a delivery for one item"
