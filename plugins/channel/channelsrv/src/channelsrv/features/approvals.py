@@ -1,7 +1,8 @@
 """The approvals feature: a card with ✅/❌ buttons, the result comes as an approval_result event.
 
-The card goes to all of the agent's chats (usually one); after a press it is
-edited to the verdict. If the agent dies waiting, the card is marked expired.
+The card goes to all of the agent's chats (usually one); the verdict is a
+follow-up message — cards are never edited (ADR-0016: no edits anywhere).
+A press on an already-answered or stale card answers "already decided".
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from channelsrv import protocol
-from channelsrv.providers.base import CardButton, MessageId
+from channelsrv.providers.base import CardButton
 from channelsrv.server import Core
 
 PREFIX = "ap:"
@@ -20,14 +21,8 @@ DETAILS_LIMIT = 1000
 
 
 @dataclass
-class _Pending:
-    agent_id: str
-    messages: list[tuple[int, MessageId | None]]  # (chat_id, message_id or ref)
-
-
-@dataclass
 class Feature:
-    _pending: dict[str, _Pending] = field(default_factory=dict)
+    _pending: dict[str, str] = field(default_factory=dict)  # approval_id -> agent_id
     _seq: itertools.count[int] = field(default_factory=itertools.count)
 
     def register(self, core: Core) -> None:
@@ -49,27 +44,25 @@ class Feature:
             chats = core.state.chats_for_agent(agent.id) or core.state.chat_ids()
             if not chats:
                 raise protocol.ProtocolError("no known chats — message the bot first")
-            messages = [
-                (
-                    chat_id,
-                    await core.provider.send_card(chat_id, text, buttons, instant=True),
-                )
-                for chat_id in chats
-            ]
-            self._pending[approval_id] = _Pending(agent_id=agent.id, messages=messages)
+            self._pending[approval_id] = agent.id
+            for chat_id in chats:
+                await core.provider.send_card(chat_id, text, buttons, instant=True)
             return protocol.ok(approval_id=approval_id)
 
         async def answer(chat_id: int, args: str) -> None:
             approval_id, _, verdict = args.rpartition(":")
-            pending = self._pending.pop(approval_id, None)
-            if pending is None:
-                return  # an old/duplicate card — just ignore it
+            agent_id = self._pending.pop(approval_id, None)
+            if agent_id is None:
+                await core.provider.send_text(
+                    chat_id, f"`{approval_id}` — already decided", instant=True
+                )
+                return
             approved = verdict == "y"
-            mark = "✅ Approved" if approved else "❌ Rejected"
-            agent = core.registry.get(pending.agent_id)
+            agent = core.registry.get(agent_id)
             if agent is None:
-                mark = f"⌛ Expired — agent is gone. Was: {mark}"
+                mark = "⌛ Expired — agent is gone"
             else:
+                mark = "✅ Approved" if approved else "❌ Rejected"
                 core.send_event(
                     agent.id,
                     {
@@ -79,11 +72,9 @@ class Feature:
                         "chat_id": chat_id,
                     },
                 )
-            for msg_chat, message_id in pending.messages:
-                if message_id is not None:
-                    await core.provider.edit_text(
-                        msg_chat, message_id, f"{mark} `{approval_id}`", instant=True
-                    )
+            await core.provider.send_text(
+                chat_id, f"{mark} `{approval_id}`", instant=True
+            )
 
         core.add_op(protocol.OP_APPROVAL_REQUEST, request)
         core.add_callback(PREFIX, answer)

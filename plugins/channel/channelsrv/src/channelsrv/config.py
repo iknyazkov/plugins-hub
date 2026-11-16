@@ -82,7 +82,9 @@ def load_config(base: Path, environ: Mapping[str, str] | None = None) -> Config:
     allowed: frozenset[int] | None = None
     if raw_ids is not None:
         try:
-            allowed = frozenset(int(x) for x in raw_ids.replace(" ", "").split(",") if x)
+            allowed = frozenset(
+                int(x) for x in raw_ids.replace(" ", "").split(",") if x
+            )
         except ValueError as exc:
             raise ConfigError(
                 f"{ENV_ALLOWED} must be comma-separated numeric user ids, got: {raw_ids!r}"

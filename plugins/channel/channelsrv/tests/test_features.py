@@ -34,7 +34,9 @@ def make_core(
     return core, provider
 
 
-def reg_agent(core: Core, agent_id: str, name: str = "agent", modes: list[str] | None = None) -> None:
+def reg_agent(
+    core: Core, agent_id: str, name: str = "agent", modes: list[str] | None = None
+) -> None:
     core.registry.register(
         agent_id=agent_id, name=name, session_name="proj", modes=modes or []
     )
@@ -63,7 +65,12 @@ async def test_status_lists_agents(tmp_path: Path) -> None:
     agent.detail = "pondering"
     await core.on_command(1, "status")
     text = provider.texts[0][1]
-    assert "claude-1" in text and "proj" in text and "thinking (pondering)" in text and "auto" in text
+    assert (
+        "claude-1" in text
+        and "proj" in text
+        and "thinking (pondering)" in text
+        and "auto" in text
+    )
 
 
 # ------------------------------------------------------------------ selection
@@ -129,37 +136,45 @@ async def test_approval_flow(tmp_path: Path) -> None:
     events = agent.events_after(0)
     assert events[-1][1]["type"] == protocol.EVENT_APPROVAL_RESULT
     assert events[-1][1]["approved"] is True
-    chat_id, message_id, edit_text = provider.edits[0]
-    assert chat_id == 42 and message_id == 1001  # the card is edited, not duplicated
-    assert edit_text.startswith("✅ Approved")
+    # the verdict is a follow-up message — cards are never edited (ADR-0016)
+    assert provider.texts[-1][0] == 42
+    assert provider.texts[-1][1].startswith("✅ Approved")
 
 
 async def test_approval_agent_died(tmp_path: Path) -> None:
     core, provider = make_core(tmp_path)
     reg_agent(core, "a1")
     await core.on_text(42, "hello")
-    resp = await req(core, protocol.OP_APPROVAL_REQUEST, agent_id="a1", kind="k", summary="s")
+    resp = await req(
+        core, protocol.OP_APPROVAL_REQUEST, agent_id="a1", kind="k", summary="s"
+    )
     approval_id = resp["approval_id"]
     core.registry.deregister("a1")
     await core.on_callback(42, f"ap:{approval_id}:n")
-    assert "Expired" in provider.edits[0][2]
+    assert "Expired" in provider.texts[-1][1]
 
 
 async def test_approval_double_press_ignored(tmp_path: Path) -> None:
     core, provider = make_core(tmp_path)
     reg_agent(core, "a1")
     await core.on_text(42, "hello")
-    resp = await req(core, protocol.OP_APPROVAL_REQUEST, agent_id="a1", kind="k", summary="s")
+    resp = await req(
+        core, protocol.OP_APPROVAL_REQUEST, agent_id="a1", kind="k", summary="s"
+    )
     approval_id = resp["approval_id"]
     await core.on_callback(42, f"ap:{approval_id}:y")
-    await core.on_callback(42, f"ap:{approval_id}:y")  # a repeat — no crash, no duplicate
-    assert len(provider.edits) == 1
+    await core.on_callback(42, f"ap:{approval_id}:y")  # a repeat answers, no crash
+    assert provider.texts[-1][1] == f"`{approval_id}` — already decided"
+    verdicts = [t for t in provider.texts if "Approved" in t[1]]
+    assert len(verdicts) == 1  # exactly one verdict, no duplicates
 
 
 async def test_approval_without_chats_fails(tmp_path: Path) -> None:
     core, _provider = make_core(tmp_path)
     reg_agent(core, "a1")
-    resp = await req(core, protocol.OP_APPROVAL_REQUEST, agent_id="a1", kind="k", summary="s")
+    resp = await req(
+        core, protocol.OP_APPROVAL_REQUEST, agent_id="a1", kind="k", summary="s"
+    )
     assert resp["ok"] is False
     assert "chat" in resp["error"]
 
@@ -174,7 +189,10 @@ async def test_modes_card_and_set(tmp_path: Path) -> None:
     await core.on_command(42, "mode")
     _, card_text, buttons = provider.cards[0]
     assert "claude-1" in card_text
-    assert [b.callback_data for row in buttons for b in row] == ["mode:auto", "mode:plan"]
+    assert [b.callback_data for row in buttons for b in row] == [
+        "mode:auto",
+        "mode:plan",
+    ]
     await core.on_callback(42, "mode:plan")
     agent = core.registry.get("a1")
     assert agent is not None
@@ -364,13 +382,19 @@ async def test_ai_converts_and_executes(tmp_path: Path, monkeypatch: Any) -> Non
         spawned.append((name, command, cwd))
         # the throwaway session's hook registers it the moment claude starts
         core.registry.register(
-            agent_id="conv", name=f"{name}-proj-7", session_name="proj", modes=[], tmux_target="%5"
+            agent_id="conv",
+            name=f"{name}-proj-7",
+            session_name="proj",
+            modes=[],
+            tmux_target="%5",
         )
 
     from channelsrv.features.nlcmd import Feature
 
     feature = Feature(
-        commands={"ai": "convert the request into one daemon command line"}, new_session=fake_new, close_session=fake_close
+        commands={"ai": "convert the request into one daemon command line"},
+        new_session=fake_new,
+        close_session=fake_close,
     )
     feature.register(core)
 
@@ -386,7 +410,9 @@ async def test_ai_converts_and_executes(tmp_path: Path, monkeypatch: Any) -> Non
     await core.on_command(42, "ai", "show me the agents")
     await task
 
-    assert spawned == [("nlconv-1", "claude", str(Path.home()))]  # no active agent → HOME
+    assert spawned == [
+        ("nlconv-1", "claude", str(Path.home()))
+    ]  # no active agent → HOME
     converter = core.registry.get("conv")
     assert converter is not None and converter.service is True
     assert pasted and pasted[-1][0] == "%5" and "show me the agents" in pasted[-1][1]
@@ -395,7 +421,9 @@ async def test_ai_converts_and_executes(tmp_path: Path, monkeypatch: Any) -> Non
     assert feature._busy is False
 
 
-async def test_ai_passes_through_non_command_reply(tmp_path: Path, monkeypatch: Any) -> None:
+async def test_ai_passes_through_non_command_reply(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
     monkeypatch.setenv("CHANNEL_AI_TIMEOUT", "5")
     closed: list[str] = []
 
@@ -412,10 +440,16 @@ async def test_ai_passes_through_non_command_reply(tmp_path: Path, monkeypatch: 
     from channelsrv.features.nlcmd import Feature
 
     Feature(
-        commands={"ai": "convert the request into one daemon command line"}, new_session=fake_new, close_session=fake_close
+        commands={"ai": "convert the request into one daemon command line"},
+        new_session=fake_new,
+        close_session=fake_close,
     ).register(core)
     converter = core.registry.register(
-        agent_id="conv", name="nlconv-1-proj-7", session_name="proj", modes=[], tmux_target="%5"
+        agent_id="conv",
+        name="nlconv-1-proj-7",
+        session_name="proj",
+        modes=[],
+        tmux_target="%5",
     )
 
     async def reply_soon() -> None:

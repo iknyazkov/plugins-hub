@@ -1,4 +1,4 @@
-"""Outbox guarantees: lanes, retries, permanent drops, refs, typing gate."""
+"""Outbox guarantees: lanes, retries, permanent drops, typing gate."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from channelsrv.outbox import (
     Outbox,
     OutboxProvider,
 )
-from channelsrv.providers.base import CardButton, MsgRef
+from channelsrv.providers.base import CardButton
 from tests.fakes import FakeProvider
 
 CHAT = 42
@@ -70,11 +70,11 @@ class FlakyProvider(FakeProvider):
         markdown: str,
         buttons: Sequence[Sequence[CardButton]],
         instant: bool = False,
-    ) -> int | MsgRef | None:
+    ) -> None:
         if self.failures > 0:
             self.failures -= 1
             raise FlakyProvider.Wobble("proxy flapped")
-        return await super().send_card(chat_id, markdown, buttons, instant)
+        await super().send_card(chat_id, markdown, buttons, instant)
 
 
 class DeadProvider(FakeProvider):
@@ -200,38 +200,15 @@ async def test_unclassified_error_is_retried_not_dropped(clock: Clock) -> None:
     assert box.depth == 1  # still queued for retry, not dropped
 
 
-# ----------------------------------------------------------------------- refs
+# ---------------------------------------------------------------------- cards
 
 
-async def test_send_card_ref_resolves_and_edit_follows(clock: Clock) -> None:
+async def test_card_delivered_through_the_queue(clock: Clock) -> None:
     provider = FakeProvider()
     box = make(provider, clock)
-    ref = box.send_card(CHAT, "chain start", [])
-    box.edit_text(CHAT, ref, "chain update")
+    box.send_card(CHAT, "pick one", [])
     await drain(box)
-    assert isinstance(ref, MsgRef) and ref.value == provider._next_id
-    assert provider.edits == [(CHAT, provider._next_id, "chain update")]
-
-
-async def test_edit_of_dead_create_is_dropped(clock: Clock) -> None:
-    class CardDies(FlakyProvider):
-        async def send_card(
-            self,
-            chat_id: int,
-            markdown: str,
-            buttons: Sequence[Sequence[CardButton]],
-            instant: bool = False,
-        ) -> int | MsgRef | None:
-            raise DeadProvider.Rejected("no card for you")
-
-    provider = CardDies()
-    box = make(provider, clock, permanent=(DeadProvider.Rejected,))
-    ref = box.send_card(CHAT, "never born", [])
-    box.edit_text(CHAT, ref, "pointless edit")
-    await drain(box)
-    assert ref.value is None
-    assert provider.edits == []
-    assert box.empty
+    assert provider.cards == [(CHAT, "pick one", ())]
 
 
 # --------------------------------------------------------------------- typing
@@ -297,8 +274,7 @@ async def test_outbox_provider_shape() -> None:
     assert isinstance(door.outbox, Outbox)
     assert door.outbox.empty
     btn = CardButton("Approve", "yes")
-    ref = await door.send_card(CHAT, "card", [[btn]], instant=True)
-    assert isinstance(ref, MsgRef)
+    await door.send_card(CHAT, "card", [[btn]], instant=True)
     assert door.outbox.depth == 1  # enqueued, not sent
     item = door.outbox._lanes["instant"][0]
     assert item.lane == "instant"

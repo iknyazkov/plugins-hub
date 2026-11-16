@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
-from channelsrv.providers.base import CardButton, MessageId
+from channelsrv.providers.base import CardButton
 
 
 @dataclass
@@ -14,9 +14,7 @@ class FakeProvider:
     cards: list[tuple[int, str, tuple[tuple[CardButton, ...], ...]]] = field(
         default_factory=list
     )
-    edits: list[tuple[int, int, str]] = field(default_factory=list)
     actions: list[int] = field(default_factory=list)
-    _next_id: int = 1000
 
     async def send_text(
         self,
@@ -33,16 +31,8 @@ class FakeProvider:
         markdown: str,
         buttons: Sequence[Sequence[CardButton]],
         instant: bool = False,
-    ) -> int | MessageId | None:
-        self._next_id += 1
-        self.cards.append((chat_id, markdown, tuple(tuple(row) for row in buttons)))
-        return self._next_id
-
-    async def edit_text(
-        self, chat_id: int, message_id: MessageId, markdown: str, instant: bool = False
     ) -> None:
-        assert isinstance(message_id, int), "fakes receive resolved ids"
-        self.edits.append((chat_id, message_id, markdown))
+        self.cards.append((chat_id, markdown, tuple(tuple(row) for row in buttons)))
 
     async def chat_action(self, chat_id: int) -> None:
         self.actions.append(chat_id)

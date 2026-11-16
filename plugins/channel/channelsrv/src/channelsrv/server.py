@@ -76,6 +76,7 @@ class Core:
             protocol.OP_DEREGISTER: self._op_deregister,
             protocol.OP_STATUS: self._op_status,
             protocol.OP_MESSAGE: self._op_message,
+            protocol.OP_TOOL: self._op_tool,
             protocol.OP_CONTEXT: self._op_context,
             protocol.OP_EVENTS: self._op_events,
         }
@@ -192,75 +193,43 @@ class Core:
         agent.tail = progress.TurnTail(path=agent.transcript_path, offset=offset)
 
     async def close_turn(self, agent: Agent) -> None:
-        """Drains the tail one last time, flushes the chain, drops the tail."""
+        """Drains the tail one last time, flushes remaining prose, drops it."""
         tail, agent.tail = agent.tail, None
         if tail is not None:
-            progress.drain_chunks(tail)  # the close flush skips the throttle
-            await self._write_progress(agent, tail)
+            blocks = progress.drain_texts(tail)
+            if blocks:
+                await self._send_prose(agent, blocks)
 
     async def progress_once(self) -> None:
-        """One tail pass: new transcript chunks into the Telegram progress chain.
+        """One tail pass: new assistant text blocks out as messages.
 
         The tail's lifetime is the turn (opened at registration, closed by a
         turn-end status), not the thinking flag — a mid-turn daemon restart
         re-registers the agent as idle, and the rest of the turn still streams.
         """
-        now = time.monotonic()
         for agent in self.registry.snapshot():
             tail = agent.tail
             if tail is None:
                 continue
-            progress.drain_chunks(tail)
-            if now - tail.last_touch < progress.PROGRESS_THROTTLE:
-                continue
-            await self._write_progress(agent, tail)
+            blocks = progress.drain_texts(tail)
+            if blocks:
+                await self._send_prose(agent, blocks)
 
-    async def _write_progress(self, agent: Agent, tail: progress.TurnTail) -> None:
+    async def _send_prose(self, agent: Agent, blocks: list[str]) -> None:
+        """Mid-turn narration — each text block its own message (ADR-0016).
+
+        An exact match with the delivered final is skipped: the Stop hook
+        re-sends the turn's last text block as the reply, and the user
+        already has it, prefixed with the agent's name.
+        """
         chats = self._agent_chats(agent.id)
-        try:
-            for segment in tail.pending:  # closed before ever shown — send as-is
-                for chat_id in chats:
-                    await self.provider.send_card(chat_id, segment, [])
-            tail.pending.clear()
-        except Exception as exc:  # progress is cosmetic, never fatal — but visible
-            log.warning(
-                "progress pending write failed: %s: %s",
-                exc.__class__.__name__,
-                exc,
-                exc_info=True,
-            )
+        if not chats:
             return
-        text = tail.chain.text
-        if not text or text == tail.sent_text:
-            return
-        if agent.last_delivered and text.rstrip().endswith(
-            agent.last_delivered.strip()
-        ):
-            # the reply was already delivered as a message (streaming lagged
-            # behind the Stop hook) — echoing it through the chain would
-            # duplicate it; the chain message keeps its earlier partial text
-            tail.sent_text = text
-            tail.last_touch = time.monotonic()
-            return
-        for chat_id in chats:
-            try:
-                message_id = tail.messages.get(chat_id)
-                if message_id is None:
-                    message_id = await self.provider.send_card(chat_id, text, [])
-                    if message_id is not None:
-                        tail.messages[chat_id] = message_id
-                else:
-                    await self.provider.edit_text(chat_id, message_id, text)
-            except Exception as exc:  # progress is cosmetic, never fatal — but visible
-                log.warning(
-                    "progress write failed: %s: %s",
-                    exc.__class__.__name__,
-                    exc,
-                    exc_info=True,
-                )
-        tail.sent_text = text
-        tail.last_touch = time.monotonic()
-        log.info("progress: %d chars -> %d chat(s)", len(text), len(chats))
+        for text in blocks:
+            if agent.last_delivered and text == agent.last_delivered:
+                continue
+            for chat_id in chats:
+                await self.provider.send_text(chat_id, text, agent_name=agent.name)
 
     async def progress_forever(self) -> None:
         while True:
@@ -273,17 +242,35 @@ class Core:
     async def _op_message(self, request: Mapping[str, Any]) -> dict[str, Any]:
         agent = self.live_agent(request)
         text = protocol.req_str(request, "text")
-        if agent.tail is not None:
-            progress.drain_chunks(agent.tail)  # the chain catches up before
-            # the echo check below (a chain edit may still be in flight)
-        # The final ALWAYS goes out as its own message. Folding it into the
-        # live chain message (the old duplicate-skip) delivered it as a
-        # silent edit: no notification, buried under newer traffic, and at
-        # least once the accepted edit never showed up where the user
-        # reads — the reply was "lost" while every log said delivered
-        # (ADR-0015). The chain may repeat the final's text in its last
-        # segment; a visible duplicate is cheaper than an invisible reply.
+        # The final ALWAYS goes out as its own message. Folding it into a
+        # streamed chain (the old duplicate-skip) delivered it as a silent
+        # edit with no notification — once an API-accepted edit never
+        # showed up where the user reads at all (ADR-0015).
         await self.deliver_from_agent(agent.id, text)
+        if agent.tail is not None:
+            # narration that completed before the Stop op: the exact-match
+            # skip in _send_prose holds the final's own text back
+            blocks = progress.drain_texts(agent.tail)
+            if blocks:
+                await self._send_prose(agent, blocks)
+        return protocol.ok()
+
+    async def _op_tool(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        """One ⚙ line per tool call, straight from the PostToolUse hook.
+
+        The hook is the event source (ADR-0016): no transcript parsing for
+        tools. Each call is its own message, no buffering — a deliberate
+        trade of volume for zero machinery.
+        """
+        agent = self.live_agent(request)
+        name = protocol.req_str(request, "name")
+        detail = protocol.opt_str(request, "detail") or ""
+        chats = self._agent_chats(agent.id)
+        if not chats:  # before the first user message there is nowhere to send
+            return protocol.ok()
+        line = progress.tool_line(name, detail)
+        for chat_id in chats:
+            await self.provider.send_text(chat_id, line, agent_name=agent.name)
         return protocol.ok()
 
     async def _op_events(self, request: Mapping[str, Any]) -> dict[str, Any]:

@@ -40,7 +40,11 @@ def make_core(tmp_path: Path) -> tuple[Core, FakeProvider]:
 
 def reg_pane_agent(core: Core, agent_id: str, target: str | None) -> None:
     core.registry.register(
-        agent_id=agent_id, name=agent_id, session_name="proj", modes=[], tmux_target=target
+        agent_id=agent_id,
+        name=agent_id,
+        session_name="proj",
+        modes=[],
+        tmux_target=target,
     )
 
 
@@ -126,7 +130,9 @@ async def test_all_patterns_must_match(tmp_path: Path) -> None:
 
     core, _ = make_core(tmp_path)
     reg_pane_agent(core, "a1", "%1")
-    sig = Signature(id="both", patterns=(re.compile("alpha"), re.compile("beta")), keys=("Enter",))
+    sig = Signature(
+        id="both", patterns=(re.compile("alpha"), re.compile("beta")), keys=("Enter",)
+    )
     screens, presses = Screens(), Presses()
     screens.by_target["%1"] = "alpha only"
     feature = make_feature(screens, presses, signatures=(sig,))

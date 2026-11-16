@@ -1,4 +1,4 @@
-"""Progress chain: chunk extraction, segment growth, daemon tail wiring."""
+"""Progress: prose tail (text blocks -> messages) and the ⚙ line format."""
 
 from __future__ import annotations
 
@@ -21,74 +21,30 @@ def assistant_entry(*blocks: dict[str, object]) -> dict[str, object]:
 # --------------------------------------------------------------- pure helpers
 
 
-class TestExtractChunks:
-    def test_text_block_becomes_a_text_chunk(self) -> None:
+class TestExtractTexts:
+    def test_text_block_is_extracted(self) -> None:
         entry = assistant_entry({"type": "text", "text": "Понял задачу.\n"})
-        assert progress.extract_chunks(entry) == [("text", "Понял задачу.")]
+        assert progress.extract_texts(entry) == ["Понял задачу."]
 
-    def test_thinking_blocks_are_skipped(self) -> None:
-        entry = assistant_entry({"type": "thinking", "thinking": "internal"})
-        assert progress.extract_chunks(entry) == []
+    def test_thinking_tool_and_results_are_skipped(self) -> None:
+        entry = assistant_entry(
+            {"type": "thinking", "thinking": "internal"},
+            {"type": "tool_use", "name": "Bash", "input": {"command": "ls"}},
+        )
+        assert progress.extract_texts(entry) == []
 
     def test_non_assistant_entries_are_skipped(self) -> None:
-        assert progress.extract_chunks({"type": "user"}) == []
-        assert progress.extract_chunks({"type": "assistant", "message": {}}) == []
-
-    def test_tool_use_becomes_a_tool_chunk(self) -> None:
-        entry = assistant_entry(
-            {
-                "type": "tool_use",
-                "name": "Agent",
-                "input": {"description": "Research limits"},
-            }
-        )
-        assert progress.extract_chunks(entry) == [
-            ("tool", "*⚙ Agent(Research limits)*")
-        ]
+        assert progress.extract_texts({"type": "user"}) == []
+        assert progress.extract_texts({"type": "assistant", "message": {}}) == []
+        assert progress.extract_texts({"type": "assistant", "message": None}) == []
 
 
 class TestToolLine:
-    def test_prefers_description_over_other_keys(self) -> None:
-        line = progress.tool_line(
-            "Bash", {"command": "git status", "description": "Check tree"}
-        )
-        assert line == "*⚙ Bash(Check tree)*"
+    def test_wraps_the_hook_provided_detail(self) -> None:
+        assert progress.tool_line("Bash", "git status") == "*⚙ Bash(git status)*"
 
-    def test_falls_back_to_command_then_any_string(self) -> None:
-        assert (
-            progress.tool_line("Bash", {"command": "git status"})
-            == "*⚙ Bash(git status)*"
-        )
-        assert progress.tool_line("Read", {"other": "note"}) == "*⚙ Read(note)*"
-
-    def test_newlines_are_collapsed_and_long_input_truncated(self) -> None:
-        line = progress.tool_line("Bash", {"command": "a\nb\n" + "x" * 200})
-        assert "\n" not in line
-        assert len(line) <= progress.TOOL_LINE_LIMIT + len("*⚙ Bash()*")
-
-    def test_empty_input_names_the_tool_only(self) -> None:
-        assert progress.tool_line("Skill", {}) == "*⚙ Skill*"
-
-
-class TestChain:
-    def test_appends_with_newlines(self) -> None:
-        chain = progress.Chain()
-        chain.add("one")
-        chain.add("two")
-        assert chain.text == "one\n\ntwo"
-
-    def test_rolls_over_when_segment_overflows(self) -> None:
-        chain = progress.Chain()
-        chain.add("a" * 30)
-        closed = chain.add("b" * progress.SEGMENT_LIMIT)
-        assert closed == ["a" * 30]
-        assert chain.text == "b" * progress.SEGMENT_LIMIT
-
-    def test_oversized_chunk_is_split(self) -> None:
-        chain = progress.Chain()
-        closed = chain.add("x" * (progress.SEGMENT_LIMIT * 2 + 10))
-        assert closed == ["x" * progress.SEGMENT_LIMIT, "x" * progress.SEGMENT_LIMIT]
-        assert chain.text == "x" * 10
+    def test_empty_detail_names_the_tool_only(self) -> None:
+        assert progress.tool_line("Skill", "") == "*⚙ Skill*"
 
 
 # ------------------------------------------------------------- daemon wiring
@@ -143,45 +99,34 @@ async def test_turn_tail_opens_at_register(
     assert agent.tail is tail
 
 
-async def test_progress_sends_first_segment_as_card(
+async def test_prose_block_goes_out_as_its_own_message(
     world: tuple[Core, FakeProvider, Path],
 ) -> None:
     core, provider, transcript = world
     write_entry(transcript, assistant_entry({"type": "text", "text": "Понял задачу."}))
     await core.progress_once()
-    assert len(provider.cards) == 1
-    chat_id, markdown, buttons = provider.cards[0]
-    assert (chat_id, markdown, buttons) == (42, "Понял задачу.", ())
-    agent = core.registry.get("a1")
-    assert agent is not None and agent.tail is not None
-    assert agent.tail.messages == {42: provider.cards and 1001}
+    assert provider.texts == [(42, "Понял задачу.", "agent")]
 
 
-async def test_progress_drains_without_thinking_status(
+async def test_prose_drains_without_thinking_status(
     world: tuple[Core, FakeProvider, Path],
 ) -> None:
     """Self-heal: after a mid-turn daemon restart the agent re-registers as
-    idle — the tail must still stream the rest of the turn."""
+    idle — the tail must still deliver the rest of the turn."""
     core, provider, transcript = world
     write_entry(transcript, assistant_entry({"type": "text", "text": "after restart"}))
     await core.progress_once()  # no thinking op was ever sent
-    assert provider.cards == [(42, "after restart", ())]
+    assert provider.texts == [(42, "after restart", "agent")]
 
 
-async def test_progress_edits_are_throttled(
+async def test_each_block_is_a_separate_message(
     world: tuple[Core, FakeProvider, Path],
 ) -> None:
     core, provider, transcript = world
     write_entry(transcript, assistant_entry({"type": "text", "text": "first"}))
-    await core.progress_once()
     write_entry(transcript, assistant_entry({"type": "text", "text": "second"}))
-    await core.progress_once()  # too soon after the first write
-    assert provider.edits == []
-    agent = core.registry.get("a1")
-    assert agent is not None and agent.tail is not None
-    agent.tail.last_touch -= progress.PROGRESS_THROTTLE + 0.1
     await core.progress_once()
-    assert provider.edits == [(42, 1001, "first\n\nsecond")]
+    assert [t[1] for t in provider.texts] == ["first", "second"]
 
 
 async def test_idle_closes_the_turn_with_a_flush(
@@ -189,43 +134,10 @@ async def test_idle_closes_the_turn_with_a_flush(
 ) -> None:
     core, provider, transcript = world
     write_entry(transcript, assistant_entry({"type": "text", "text": "mid-turn note"}))
-    await idle(core)  # flush happens on close, no throttle — first write is a card
-    assert provider.cards == [(42, "mid-turn note", ())]
+    await idle(core)
+    assert [t[1] for t in provider.texts] == ["mid-turn note"]
     agent = core.registry.get("a1")
     assert agent is not None and agent.tail is None
-
-
-async def test_idle_flush_edits_the_live_message(
-    world: tuple[Core, FakeProvider, Path],
-) -> None:
-    core, provider, transcript = world
-    write_entry(transcript, assistant_entry({"type": "text", "text": "first"}))
-    await core.progress_once()
-    write_entry(transcript, assistant_entry({"type": "text", "text": "second"}))
-    await idle(core)  # unthrottled flush of the live message
-    assert provider.edits == [(42, 1001, "first\n\nsecond")]
-    agent = core.registry.get("a1")
-    assert agent is not None and agent.tail is None
-
-
-async def test_rollover_abandons_the_old_message(
-    world: tuple[Core, FakeProvider, Path],
-) -> None:
-    core, provider, transcript = world
-    write_entry(transcript, assistant_entry({"type": "text", "text": "a" * 30}))
-    await core.progress_once()
-    write_entry(
-        transcript,
-        assistant_entry({"type": "text", "text": "b" * progress.SEGMENT_LIMIT}),
-    )
-    agent = core.registry.get("a1")
-    assert agent is not None and agent.tail is not None
-    agent.tail.last_touch -= progress.PROGRESS_THROTTLE + 0.1
-    await core.progress_once()
-    # the closed segment is left alone; a fresh message carries the new segment
-    assert len(provider.cards) == 2
-    assert provider.cards[1] == (42, "b" * progress.SEGMENT_LIMIT, ())
-    assert provider.edits == []
 
 
 # ------------------------------------- final replies are always fresh messages
@@ -234,15 +146,15 @@ async def test_rollover_abandons_the_old_message(
 async def test_final_already_streamed_is_still_sent_as_message(
     world: tuple[Core, FakeProvider, Path],
 ) -> None:
-    """ADR-0015: folding the final into a silent chain edit lost replies
+    """ADR-0015: folding the final into a silent edit lost replies
     (2026-11-15 incident); the final goes out as its own message even when
-    the chain already carries it verbatim."""
+    the turn's stream carried it verbatim."""
     core, provider, transcript = world
     final = "Итог: всё готово."
     write_entry(transcript, assistant_entry({"type": "text", "text": final}))
     resp = await core.handle({"v": 1, "op": "message", "agent_id": "a1", "text": final})
     assert resp == {"ok": True}
-    assert provider.texts == [(42, final, "agent")]
+    assert provider.texts == [(42, final, "agent")]  # the prose copy is skipped
     await idle(core)
     agent = core.registry.get("a1")
     assert agent is not None and agent.tail is None
@@ -257,26 +169,11 @@ async def test_unseen_final_is_delivered(
             "v": 1,
             "op": "message",
             "agent_id": "a1",
-            "text": "Финал, которого нет в цепочке",
+            "text": "Финал, которого нет в стриме",
         }
     )
     assert resp == {"ok": True}
-    assert provider.texts == [(42, "Финал, которого нет в цепочке", "agent")]
-
-
-async def test_final_covered_across_rollover_is_still_sent(
-    world: tuple[Core, FakeProvider, Path],
-) -> None:
-    core, provider, transcript = world
-    write_entry(
-        transcript,
-        assistant_entry({"type": "text", "text": "a" * (progress.SEGMENT_LIMIT - 1)}),
-    )
-    final = "Итог длинного turn'а."
-    write_entry(transcript, assistant_entry({"type": "text", "text": final}))
-    resp = await core.handle({"v": 1, "op": "message", "agent_id": "a1", "text": final})
-    assert resp == {"ok": True}
-    assert provider.texts == [(42, final, "agent")]
+    assert provider.texts == [(42, "Финал, которого нет в стриме", "agent")]
 
 
 async def test_late_message_after_idle_is_delivered(
@@ -287,10 +184,11 @@ async def test_late_message_after_idle_is_delivered(
     core, provider, transcript = world
     final = "Уже отстримлено."
     write_entry(transcript, assistant_entry({"type": "text", "text": final}))
-    await idle(core)  # close_turn ran first: tail gone
+    await idle(core)  # close_turn ran first: the prose copy already went out
     resp = await core.handle({"v": 1, "op": "message", "agent_id": "a1", "text": final})
     assert resp == {"ok": True}
-    assert provider.texts == [(42, final, "agent")]
+    # the rare visible double (ADR-0015's accepted cost): prose, then final
+    assert provider.texts == [(42, final, "agent"), (42, final, "agent")]
 
 
 async def test_new_message_after_idle_is_delivered(
@@ -298,31 +196,25 @@ async def test_new_message_after_idle_is_delivered(
 ) -> None:
     core, provider, transcript = world
     write_entry(transcript, assistant_entry({"type": "text", "text": "turn text"}))
-    await idle(core)
+    await idle(core)  # the turn's prose went out at close
     await core.handle(
         {"v": 1, "op": "message", "agent_id": "a1", "text": "свежий текст"}
     )
-    assert provider.texts == [(42, "свежий текст", "agent")]
+    assert provider.texts == [(42, "turn text", "agent"), (42, "свежий текст", "agent")]
 
 
-# ------------------------------------------------- delivered reply vs chain flush
+# ------------------------------------------- the ⚙ op (PostToolUse hook events)
 
 
-async def test_delivered_reply_is_not_re_shown_by_the_chain(
+async def test_tool_op_sends_a_gear_line(
     world: tuple[Core, FakeProvider, Path],
 ) -> None:
-    """The Stop race, symmetric side: the reply was delivered before the
-    chain could stream it (transcript flush lagged) — the close flush must
-    not re-show the delivered text, or the chat sees it twice."""
-    core, provider, transcript = world
-    final = "Финал, обогнавший стрим."
-    resp = await core.handle({"v": 1, "op": "message", "agent_id": "a1", "text": final})
+    core, provider, _ = world
+    resp = await core.handle(
+        {"v": 1, "op": "tool", "agent_id": "a1", "name": "Bash", "detail": "git status"}
+    )
     assert resp == {"ok": True}
-    assert provider.texts == [(42, final, "agent")]  # delivered, nothing streamed yet
-    write_entry(transcript, assistant_entry({"type": "text", "text": final}))
-    await idle(core)  # the close flush reads the entry — and must skip the echo
-    assert provider.cards == []
-    assert provider.edits == []
+    assert provider.texts == [(42, "*⚙ Bash(git status)*", "agent")]
 
 
 # ------------------------------------------------- transcript rewrite (compaction)
@@ -331,20 +223,18 @@ async def test_delivered_reply_is_not_re_shown_by_the_chain(
 async def test_shrunk_transcript_is_skipped_not_reread(tmp_path: Path) -> None:
     """Incident 2026-11-16: the harness rewrites/compacts the session file;
     the old `size < offset -> read from zero` re-streamed the whole history
-    into the chain — the user saw a "ghost" duplicate of an old reply,
-    prefixless (chain messages carry no agent name). On shrink, skip to the
-    new end: rewritten history is old by definition, never new progress."""
+    — the user saw a "ghost" duplicate of an old reply, prefixless. On
+    shrink, skip to the new end: rewritten history is old by definition."""
     transcript = tmp_path / "t.jsonl"
-    old = assistant_entry({"type": "text", "text": "Нашёл. Диагноз точный…"})
-    write_entry(transcript, old)
+    write_entry(
+        transcript, assistant_entry({"type": "text", "text": "Нашёл. Диагноз точный…"})
+    )
     tail = progress.TurnTail(path=str(transcript))
-    progress.drain_chunks(tail)  # streamed once already
-    assert tail.chain.text  # something was read
+    assert progress.drain_texts(tail) == ["Нашёл. Диагноз точный…"]
 
     # the harness compacts: the file is rewritten smaller, with fresh content
     transcript.write_text(
         json.dumps(assistant_entry({"type": "text", "text": "новая жизнь"})) + "\n"
     )
-    chunks = progress.read_new_chunks(tail)
-    assert chunks == []  # the rewritten past is not progress — skipped
+    assert progress.drain_texts(tail) == []  # the rewritten past is not progress
     assert tail.offset == transcript.stat().st_size  # fast-forwarded to EOF

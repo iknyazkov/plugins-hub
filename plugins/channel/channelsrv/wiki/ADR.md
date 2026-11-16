@@ -309,3 +309,35 @@ the pre-fix code. The unexplained invisible edit stays in KNOWN_ISSUES.
 rejected: losing the trail when a final never arrives (hook death) is
 worse than a duplicate; fix the edit-visibility bug instead — rejected:
 no reproduction, and finals no longer depend on chain edits.
+
+## ADR-0016 — No edits, no chain: every delivery is its own message
+
+**Status:** accepted (decided 2026-11-16, recorded 2026-11-16)
+
+**Context:** five incidents in two days, four of them inside the progress
+chain (a second delivery subsystem with its own state: message ids,
+edits, rollovers, segment limits, echo suppression, offsets over a
+transcript the daemon does not own): an invisible folded final, ghost
+re-streams after harness compaction, silently over-long segments, and a
+flush-vs-worker double send. Each fix touched a neighboring invariant.
+
+**Decision:** subtract. The PostToolUse hook is the event source for
+tool calls — one ⚙ message per call, no buffering (owner's explicit
+choice: no invented machinery). The transcript tail survives only for
+assistant text blocks: each block is its own message; the provider has
+no edit at all (approvals answer with a follow-up message, repeat clicks
+get "already decided"). The exact-match skip in `_send_prose` keeps the
+Stop final from double-sending in the common ordering; the rare
+tick-beats-Stop race yields a visible double — accepted, as in
+ADR-0015. Supersedes ADR-0014's MsgRef/edit plumbing and the chain half
+of everything before it.
+
+**Consequences:** ⚙ volume equals tool-call volume (a knob can be added
+later, by explicit decision); no message-id tracking anywhere; the
+invisible-edit mystery (KNOWN_ISSUES) is closed by removal — no edits
+exist to be invisible; prose blocks >4096 are split by the provider's
+markdown chunker, no segment math of our own.
+
+**Alternatives considered:** keep the chain and harden — rejected: the
+chain's invariants outnumber its value; batch/throttle ⚙ — rejected by
+the owner as more invented machinery.

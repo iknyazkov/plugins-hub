@@ -37,7 +37,10 @@ text runs longer than source markdown, and 3900-char segments drew
 `BadRequest Message_is_too_long` (three drops on 2026-11-15/16, now
 visible in logs thanks to the outbox).
 
-## Progress-chain edit accepted but invisible (2026-11-15, open)
+## Progress-chain edit accepted but invisible (2026-11-15, CLOSED by ADR-0016)
+
+Unexplained then, impossible now: 0.2.0 removed edits entirely — every
+delivery is its own message.
 
 `progress: 2897 chars` logged at 16:10:51 with no warning — the API call
 succeeded — yet the message the user sees never contained the edited text

@@ -47,7 +47,9 @@ def render(markdown: str) -> tuple[str, list[telegram.MessageEntity]]:
     except Exception:  # noqa: BLE001 — degradation matters more than diagnosis, the text must go out
         return markdown, []
     entities = [
-        telegram.MessageEntity(e.type, e.offset, e.length, url=e.url, language=e.language)
+        telegram.MessageEntity(
+            e.type, e.offset, e.length, url=e.url, language=e.language
+        )
         for e in raw
     ]
     return text, entities

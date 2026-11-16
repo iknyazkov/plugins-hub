@@ -10,7 +10,9 @@ def make_registry(now: list[float]) -> Registry:
 
 def test_register_and_get() -> None:
     reg = make_registry([100.0])
-    agent = reg.register(agent_id="a1", name="claude-1", session_name="proj", modes=["auto", "plan"])
+    agent = reg.register(
+        agent_id="a1", name="claude-1", session_name="proj", modes=["auto", "plan"]
+    )
     assert agent.status == protocol.STATUS_IDLE
     assert reg.get("a1") is agent
     assert reg.get("missing") is None
@@ -25,7 +27,9 @@ def test_reregister_replaces() -> None:
     first.push({"type": "user_message"})
     agent = reg.register(agent_id="a1", name="new", session_name="s", modes=[])
     assert agent.name == "new"
-    assert agent.events_after(0) == []  # history from the previous life is not carried over
+    assert (
+        agent.events_after(0) == []
+    )  # history from the previous life is not carried over
 
 
 def test_deregister() -> None:

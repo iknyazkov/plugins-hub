@@ -75,6 +75,19 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -x \"${CLAUDE_PLUGIN_ROOT}/hooks/channel-hook\" ] && \"${CLAUDE_PLUGIN_ROOT}/hooks/channel-hook\" || true",
+            "timeout": 10,
+            "async": true
+          }
+        ]
+      }
     ]
   }
 }

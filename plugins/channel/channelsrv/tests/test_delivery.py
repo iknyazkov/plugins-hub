@@ -6,7 +6,12 @@ from channelsrv.delivery import agent_id_for, agent_name_for, parse_panes
 def test_parse_panes_reads_tab_separated_rows() -> None:
     text = "%1\tclaude\t/Users/x/my-proj\tchannel\n%0\trbi\t/Users/x\tsystem\n"
     assert parse_panes(text) == [
-        {"id": "%1", "command": "claude", "path": "/Users/x/my-proj", "session": "channel"},
+        {
+            "id": "%1",
+            "command": "claude",
+            "path": "/Users/x/my-proj",
+            "session": "channel",
+        },
         {"id": "%0", "command": "rbi", "path": "/Users/x", "session": "system"},
     ]
 
@@ -31,7 +36,10 @@ def test_agent_id_matches_hook_formula() -> None:
 
 def test_agent_name_matches_hook_formula() -> None:
     # hooks/channel-hook identity(): {session}-{basename}-{pane_num}, pane number w/o '%'
-    assert agent_name_for("channel", "/Users/x/plugins-hub", "%12") == "channel-plugins-hub-12"
+    assert (
+        agent_name_for("channel", "/Users/x/plugins-hub", "%12")
+        == "channel-plugins-hub-12"
+    )
     assert agent_name_for(None, "/Users/x/proj", "%5") == "proj-5"
 
 

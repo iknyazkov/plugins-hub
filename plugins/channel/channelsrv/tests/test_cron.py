@@ -114,7 +114,9 @@ async def test_store_roundtrip_and_garbage(tmp_path: Path) -> None:
 
     job = _job("daily-report", "a1b2c3")
     store.add(job)
-    store.set_last_run(job.id, {"at": "2026-11-10T09:00:00", "status": "ok", "error": None})
+    store.set_last_run(
+        job.id, {"at": "2026-11-10T09:00:00", "status": "ok", "error": None}
+    )
 
     again = JobStore(tmp_path / "cron.json")
     again.load()
@@ -194,7 +196,11 @@ async def test_cron_add_calls_the_converter(tmp_path: Path) -> None:
 
     core, provider, _feature, _store = await make_feature(tmp_path, convert=convert)
     await core.on_command(42, "cron", "add every morning at 9 check the build")
-    assert len(calls) == 1 and calls[0][0] == 42 and calls[0][2] == "every morning at 9 check the build"
+    assert (
+        len(calls) == 1
+        and calls[0][0] == 42
+        and calls[0][2] == "every morning at 9 check the build"
+    )
     assert calls[0][1].startswith(CONVERT_PROMPT)
     assert "Current local time" in calls[0][1]  # so relative one-shots can resolve
 
@@ -220,13 +226,33 @@ async def test_cron_put_rejects_garbage(tmp_path: Path) -> None:
         json.dumps({"name": "Bad_Name", "cron": "0 9 * * *", "prompt": "x"}),
         json.dumps({"name": "ok-name", "cron": "* * * *", "prompt": "x"}),
         json.dumps({"name": "ok-name", "cron": "0 9 * * *"}),
-        json.dumps({"name": "ok-name", "cron": "0 9 * * *", "prompt": "x", "cwd": "relative/path"}),
+        json.dumps(
+            {
+                "name": "ok-name",
+                "cron": "0 9 * * *",
+                "prompt": "x",
+                "cwd": "relative/path",
+            }
+        ),
         json.dumps({"name": "ok-name", "cron": "0 9 * * *", "prompt": "x", "cwd": 42}),
-        json.dumps({"name": "ok-name", "cron": "0 9 * * *", "prompt": "x", "agent": 42}),
-        json.dumps({"name": "ok-name", "cron": "0 9 * * *", "prompt": "x", "agent": "a\nb"}),
-        json.dumps({"name": "ok-name", "cron": "0 9 * * *", "at": "2026-11-10T09:05", "prompt": "x"}),
+        json.dumps(
+            {"name": "ok-name", "cron": "0 9 * * *", "prompt": "x", "agent": 42}
+        ),
+        json.dumps(
+            {"name": "ok-name", "cron": "0 9 * * *", "prompt": "x", "agent": "a\nb"}
+        ),
+        json.dumps(
+            {
+                "name": "ok-name",
+                "cron": "0 9 * * *",
+                "at": "2026-11-10T09:05",
+                "prompt": "x",
+            }
+        ),
         json.dumps({"name": "ok-name", "prompt": "x"}),  # neither schedule key
-        json.dumps({"name": "ok-name", "at": "2026-11-01T09:00", "prompt": "x"}),  # in the past
+        json.dumps(
+            {"name": "ok-name", "at": "2026-11-01T09:00", "prompt": "x"}
+        ),  # in the past
         json.dumps({"name": "ok-name", "at": "not-a-date", "prompt": "x"}),
     ]
     for payload in rejects:
@@ -478,7 +504,9 @@ async def test_scheduled_fire_skips_busy_and_cap(tmp_path: Path) -> None:
     for i in range(3):
         feature._runs[f"other-{i}"] = asyncio.create_task(asyncio.sleep(10))
     await feature._tick(FIXED_NOW)
-    assert "skipped" in provider.texts[-1][1] and "already active" in provider.texts[-1][1]
+    assert (
+        "skipped" in provider.texts[-1][1] and "already active" in provider.texts[-1][1]
+    )
     for t in feature._runs.values():
         t.cancel()
     hanging.cancel()
@@ -585,7 +613,12 @@ async def test_orphan_sweep_kills_only_scheduler_sessions(tmp_path: Path) -> Non
 async def test_cron_put_one_shot(tmp_path: Path) -> None:
     core, provider, _feature, store = await make_feature(tmp_path)
     payload = json.dumps(
-        {"name": "quick-check", "at": "2026-11-10T09:05", "prompt": "peek", "agent": "zaiclaude"}
+        {
+            "name": "quick-check",
+            "at": "2026-11-10T09:05",
+            "prompt": "peek",
+            "agent": "zaiclaude",
+        }
     )
     await core.on_command(42, "cron_put", payload)
     text = provider.texts[-1][1]

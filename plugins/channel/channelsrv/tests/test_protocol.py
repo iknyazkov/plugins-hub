@@ -9,7 +9,9 @@ def test_version_ok() -> None:
     protocol.check_version({"v": 1, "op": "healthz"})
 
 
-@pytest.mark.parametrize("bad", [{"op": "x"}, {"v": 2, "op": "x"}, {"v": "1", "op": "x"}])
+@pytest.mark.parametrize(
+    "bad", [{"op": "x"}, {"v": 2, "op": "x"}, {"v": "1", "op": "x"}]
+)
 def test_version_rejected(bad: dict[str, object]) -> None:
     with pytest.raises(protocol.ProtocolError):
         protocol.check_version(bad)

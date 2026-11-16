@@ -29,7 +29,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from channelsrv.providers.base import CardButton, MessageId, MsgRef, Provider
+from channelsrv.providers.base import CardButton, Provider
 
 log = logging.getLogger(__name__)
 
@@ -42,19 +42,15 @@ STALL_WARN_AFTER = 30.0
 LANE_INSTANT = "instant"
 LANE_NORMAL = "normal"
 
-Outcome = str  # "ok" | "wait" | "dead"
-
 
 @dataclass(eq=False)  # identity semantics: deque.remove must hit this very item
 class _Item:
-    call: str  # "send_text" | "send_card" | "edit_text"
+    call: str  # "send_text" | "send_card"
     chat_id: int
     text: str
     lane: str = LANE_NORMAL
     agent_name: str | None = None
     buttons: tuple[tuple[CardButton, ...], ...] = ()
-    message_id: MessageId | None = None  # edit_text target
-    ref: MsgRef | None = None  # send_card: who to tell the new id
     enqueued_at: float = 0.0  # set by _enqueue on the outbox's own clock
     attempts: int = 0
     next_at: float = 0.0
@@ -97,11 +93,10 @@ class Outbox:
     def empty(self) -> bool:
         return self.depth == 0
 
-    def _enqueue(self, item: _Item) -> MsgRef | None:
+    def _enqueue(self, item: _Item) -> None:
         item.enqueued_at = item.next_at = self._now()
         self._lanes[item.lane].append(item)
         self._wake.set()
-        return item.ref
 
     def send_text(
         self,
@@ -126,8 +121,7 @@ class Outbox:
         markdown: str,
         buttons: Sequence[Sequence[CardButton]],
         instant: bool = False,
-    ) -> MsgRef:
-        ref = MsgRef()
+    ) -> None:
         self._enqueue(
             _Item(
                 call="send_card",
@@ -135,21 +129,6 @@ class Outbox:
                 text=markdown,
                 lane=LANE_INSTANT if instant else LANE_NORMAL,
                 buttons=tuple(tuple(row) for row in buttons),
-                ref=ref,
-            )
-        )
-        return ref
-
-    def edit_text(
-        self, chat_id: int, message_id: MessageId, markdown: str, instant: bool = False
-    ) -> None:
-        self._enqueue(
-            _Item(
-                call="edit_text",
-                chat_id=chat_id,
-                text=markdown,
-                lane=LANE_INSTANT if instant else LANE_NORMAL,
-                message_id=message_id,
             )
         )
 
@@ -183,7 +162,7 @@ class Outbox:
         for lane in (LANE_INSTANT, LANE_NORMAL):
             for item in list(self._lanes[lane]):
                 try:
-                    outcome = await self._attempt(item)
+                    await self._attempt(item)
                 except Exception as exc:  # noqa: BLE001 — flush is best-effort by design
                     if self._permanent and isinstance(exc, self._permanent):
                         self._drop(
@@ -197,9 +176,7 @@ class Outbox:
                             exc,
                         )
                     continue
-                if outcome == "ok":
-                    self._remove(item)
-                # "wait"/"dead" stay queued — moot once the process exits
+                self._remove(item)
 
     async def _run(self) -> None:
         while True:
@@ -220,7 +197,7 @@ class Outbox:
 
     async def _deliver(self, item: _Item, ignore_delay: bool = False) -> None:
         try:
-            outcome = await self._attempt(item)
+            await self._attempt(item)
         except Exception as exc:  # noqa: BLE001 — any failure retries or drops, the worker lives on
             if self._permanent and isinstance(exc, self._permanent):
                 self._drop(
@@ -229,40 +206,17 @@ class Outbox:
                 return
             self._retry(item, exc, ignore_delay)
             return
-        if outcome == "dead":
-            self._remove(item)
-            log.debug("outbox: edit of a dead message dropped (%s)", item.text[:60])
-            return
-        if outcome == "wait":  # the target create is still in flight
-            item.next_at = self._now() + 1.0
-            return
         self._remove(item)
         if self.empty:
             self._stall_warned = False
 
-    async def _attempt(self, item: _Item) -> Outcome:
+    async def _attempt(self, item: _Item) -> None:
         if item.call == "send_text":
             await self._provider.send_text(
                 item.chat_id, item.text, agent_name=item.agent_name
             )
-            return "ok"
-        if item.call == "send_card":
-            mid = await self._provider.send_card(item.chat_id, item.text, item.buttons)
-            if item.ref is not None:
-                item.ref.resolve(mid if isinstance(mid, int) else None)
-            return "ok"
-        mid = item.message_id
-        if mid is None:
-            return "dead"  # an edit with no target — enqueue-side bug, drop it
-        if isinstance(mid, MsgRef):
-            if not mid.resolved:
-                return "wait"
-            value = mid.value
-            if value is None:
-                return "dead"  # the create was dropped — nothing to edit
-            mid = value
-        await self._provider.edit_text(item.chat_id, mid, item.text)
-        return "ok"
+        else:
+            await self._provider.send_card(item.chat_id, item.text, item.buttons)
 
     def _remove(self, item: _Item) -> None:
         # identity-based (eq=False above): exact item, head or not
@@ -270,8 +224,6 @@ class Outbox:
 
     def _drop(self, item: _Item, why: str) -> None:
         self._remove(item)
-        if item.ref is not None:
-            item.ref.resolve(None)
         log.error("outbox: item dropped — %s; text: %r", why, item.text[:120])
 
     def _retry(self, item: _Item, exc: Exception, ignore_delay: bool) -> None:
@@ -355,13 +307,8 @@ class OutboxProvider:
         markdown: str,
         buttons: Sequence[Sequence[CardButton]],
         instant: bool = False,
-    ) -> MsgRef:
-        return self.outbox.send_card(chat_id, markdown, buttons, instant=instant)
-
-    async def edit_text(
-        self, chat_id: int, message_id: MessageId, markdown: str, instant: bool = False
     ) -> None:
-        self.outbox.edit_text(chat_id, message_id, markdown, instant=instant)
+        self.outbox.send_card(chat_id, markdown, buttons, instant=instant)
 
     async def chat_action(self, chat_id: int) -> None:
         if not self.outbox.empty:  # a stale typing indicator would lie

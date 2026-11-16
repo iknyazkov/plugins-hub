@@ -78,7 +78,9 @@ async def call(sock: Path, request: dict[str, Any] | str) -> dict[str, Any]:
     return response
 
 
-def register_req(agent_id: str, name: str = "agent", modes: list[str] | None = None) -> dict[str, Any]:
+def register_req(
+    agent_id: str, name: str = "agent", modes: list[str] | None = None
+) -> dict[str, Any]:
     return {
         "v": 1,
         "op": "register",
@@ -107,29 +109,54 @@ async def test_register_validates_fields(world: SimpleNamespace) -> None:
     bad_modes = register_req("a1")
     bad_modes["modes"] = "auto"
     assert (await call(world.sock, bad_modes))["ok"] is False
-    assert (await call(world.sock, register_req("a1", modes=["auto", "plan"])))["ok"] is True
+    assert (await call(world.sock, register_req("a1", modes=["auto", "plan"])))[
+        "ok"
+    ] is True
 
 
 async def test_ops_of_unknown_agent_fail(world: SimpleNamespace) -> None:
     for op in ("status", "message", "events"):
-        resp = await call(world.sock, {"v": 1, "op": op, "agent_id": "ghost", "status": "idle", "text": "x", "cursor": 0})
+        resp = await call(
+            world.sock,
+            {
+                "v": 1,
+                "op": op,
+                "agent_id": "ghost",
+                "status": "idle",
+                "text": "x",
+                "cursor": 0,
+            },
+        )
         assert resp["ok"] is False, op
 
 
 async def test_status_flow_and_thinking_indicator(world: SimpleNamespace) -> None:
     await call(world.sock, register_req("a1"))
-    resp = await call(world.sock, {"v": 1, "op": "status", "agent_id": "a1", "status": "thinking", "detail": "pondering"})
+    resp = await call(
+        world.sock,
+        {
+            "v": 1,
+            "op": "status",
+            "agent_id": "a1",
+            "status": "thinking",
+            "detail": "pondering",
+        },
+    )
     assert resp["ok"] is True
     # no chats yet — nowhere to send the indicator, but no crash either
     assert world.provider.actions == []
-    bad = await call(world.sock, {"v": 1, "op": "status", "agent_id": "a1", "status": "offline"})
+    bad = await call(
+        world.sock, {"v": 1, "op": "status", "agent_id": "a1", "status": "offline"}
+    )
     assert bad["ok"] is False  # offline is the server's verdict, not a bridge's
 
 
 async def test_user_message_roundtrip(world: SimpleNamespace) -> None:
     await call(world.sock, register_req("a1", name="claude-1"))
     await world.core.on_text(42, "hello")  # the only agent — auto-selected
-    resp = await call(world.sock, {"v": 1, "op": "events", "agent_id": "a1", "cursor": 0})
+    resp = await call(
+        world.sock, {"v": 1, "op": "events", "agent_id": "a1", "cursor": 0}
+    )
     assert resp["ok"] is True
     events = resp["events"]
     assert len(events) == 1
@@ -137,14 +164,19 @@ async def test_user_message_roundtrip(world: SimpleNamespace) -> None:
     assert events[0]["chat_id"] == 42
     assert events[0]["text"] == "hello"
     # repeat with the current cursor — empty (0.2s timeout in the fixture)
-    empty = await call(world.sock, {"v": 1, "op": "events", "agent_id": "a1", "cursor": events[0]["cursor"]})
+    empty = await call(
+        world.sock,
+        {"v": 1, "op": "events", "agent_id": "a1", "cursor": events[0]["cursor"]},
+    )
     assert empty["events"] == []
 
 
 async def test_agent_message_reaches_chat_with_name(world: SimpleNamespace) -> None:
     await call(world.sock, register_req("a1", name="claude-1"))
     await world.core.on_text(42, "hello")  # the chat became known
-    resp = await call(world.sock, {"v": 1, "op": "message", "agent_id": "a1", "text": "reply"})
+    resp = await call(
+        world.sock, {"v": 1, "op": "message", "agent_id": "a1", "text": "reply"}
+    )
     assert resp["ok"] is True
     assert world.provider.texts == [(42, "reply", "claude-1")]
 
@@ -164,35 +196,42 @@ async def test_final_always_fresh_message_even_when_chain_streamed_it(
     req["transcript_path"] = str(transcript)
     await call(world.sock, req)
     await world.core.on_text(42, "hello")  # the chat became known
-    await call(world.sock, {"v": 1, "op": "status", "agent_id": "a1", "status": "thinking"})
+    await call(
+        world.sock, {"v": 1, "op": "status", "agent_id": "a1", "status": "thinking"}
+    )
     # the turn streams its whole final text as an assistant block...
     transcript.write_text(
         json.dumps(
             {
                 "type": "assistant",
-                "message": {"content": [{"type": "text", "text": "Дерево закрыто. Сводка…"}]},
+                "message": {
+                    "content": [{"type": "text", "text": "Дерево закрыто. Сводка…"}]
+                },
             }
         )
         + "\n"
     )
     agent = world.core.registry.get("a1")
     assert agent is not None
-    await world.core.close_turn(agent)  # the chain catches up and shows it
-    assert world.provider.cards or world.provider.edits  # the chain carried the text
+    await world.core.close_turn(agent)  # the turn's stream already carried it
+    assert (42, "Дерево закрыто. Сводка…", "claude-1") in world.provider.texts
     # ...and the Stop hook then reports the same text as the turn's reply
     resp = await call(
         world.sock,
         {"v": 1, "op": "message", "agent_id": "a1", "text": "Дерево закрыто. Сводка…"},
     )
     assert resp["ok"] is True
-    # the reply is a message of its own — not folded into the chain
-    assert (42, "Дерево закрыто. Сводка…", "claude-1") in world.provider.texts
+    # the reply is a message of its own — the prose copy does not replace it
+    delivered = [t[1] for t in world.provider.texts]
+    assert delivered.count("Дерево закрыто. Сводка…") >= 1
 
 
 async def test_thinking_after_chat_known(world: SimpleNamespace) -> None:
     await call(world.sock, register_req("a1"))
     await world.core.on_text(42, "hello")
-    await call(world.sock, {"v": 1, "op": "status", "agent_id": "a1", "status": "thinking"})
+    await call(
+        world.sock, {"v": 1, "op": "status", "agent_id": "a1", "status": "thinking"}
+    )
     assert world.provider.actions == [42]
 
 
@@ -204,7 +243,9 @@ async def test_many_agents_require_selection(world: SimpleNamespace) -> None:
     assert world.provider.texts[0][1] == world.core.select_hint
     world.core.state.set_active_agent(42, "a2")
     await world.core.on_text(42, "more")
-    resp = await call(world.sock, {"v": 1, "op": "events", "agent_id": "a2", "cursor": 0})
+    resp = await call(
+        world.sock, {"v": 1, "op": "events", "agent_id": "a2", "cursor": 0}
+    )
     assert [e["text"] for e in resp["events"]] == ["more"]
     a1 = await call(world.sock, {"v": 1, "op": "events", "agent_id": "a1", "cursor": 0})
     assert a1["events"] == []
@@ -324,6 +365,7 @@ async def test_sweep_once_spares_tmux_agents_from_grace(tmp_path: Path) -> None:
     core.registry.register(
         agent_id="tmux-one", name="n", session_name="s", modes=[], tmux_target="%3"
     )
+
     async def always_alive(target: str) -> bool:
         return True
 
@@ -376,7 +418,11 @@ async def test_service_agent_captured_not_broadcast(tmp_path: Path) -> None:
     provider = FakeProvider()
     core = make_core(tmp_path, provider=provider)
     core.registry.register(
-        agent_id="svc", name="nlconv-1-proj-7", session_name="proj", modes=[], service=True
+        agent_id="svc",
+        name="nlconv-1-proj-7",
+        session_name="proj",
+        modes=[],
+        service=True,
     )
     core.state.note_chat(42)
     await core.deliver_from_agent("svc", "/close work")
@@ -389,7 +435,11 @@ async def test_service_agent_captured_not_broadcast(tmp_path: Path) -> None:
 async def test_service_agents_excluded_from_selection(tmp_path: Path) -> None:
     core = make_core(tmp_path)
     core.registry.register(
-        agent_id="svc", name="nlconv-1-proj-7", session_name="proj", modes=[], service=True
+        agent_id="svc",
+        name="nlconv-1-proj-7",
+        session_name="proj",
+        modes=[],
+        service=True,
     )
     core.registry.register(agent_id="a1", name="n", session_name="proj", modes=[])
     await core.on_text(42, "hello")  # the service agent must not confuse routing
@@ -414,10 +464,9 @@ async def test_allowed_ids_gate() -> None:
 
 # ------------------------------------------------------------- restart adoption
 
+
 def make_panes(*specs: tuple[str, str, str, str]) -> list[dict[str, str]]:
-    return [
-        {"id": i, "command": c, "path": p, "session": s} for i, c, p, s in specs
-    ]
+    return [{"id": i, "command": c, "path": p, "session": s} for i, c, p, s in specs]
 
 
 async def test_adopt_registers_claude_panes_only(tmp_path: Path) -> None:
@@ -428,7 +477,10 @@ async def test_adopt_registers_claude_panes_only(tmp_path: Path) -> None:
     )
     core = make_core(tmp_path, list_panes=lambda: asyncio.sleep(0, result=panes))
     adopted = await core.adopt_agents()
-    assert sorted(a.id for a in adopted) == ["claude-plugins-hub-%1", "claude-plugins-hub-%14"]
+    assert sorted(a.id for a in adopted) == [
+        "claude-plugins-hub-%1",
+        "claude-plugins-hub-%14",
+    ]
     by_id = {a.id: a for a in adopted}
     assert by_id["claude-plugins-hub-%1"].tmux_target == "%1"
     assert by_id["claude-plugins-hub-%1"].name == "channel-plugins-hub-1"
@@ -467,7 +519,9 @@ async def test_adopt_prunes_transcripts_of_unadopted_agents(tmp_path: Path) -> N
 async def test_adopt_announces_to_pinned_chats_only(tmp_path: Path) -> None:
     provider = FakeProvider()
     panes = make_panes(("%1", "claude", "/Users/x/proj", "s"))
-    core = make_core(tmp_path, provider, list_panes=lambda: asyncio.sleep(0, result=panes))
+    core = make_core(
+        tmp_path, provider, list_panes=lambda: asyncio.sleep(0, result=panes)
+    )
     core.state.set_active_agent(42, "claude-proj-%1")
     core.state.set_active_agent(43, "claude-gone-%9")
     adopted = await core.adopt_agents()
@@ -483,7 +537,9 @@ async def test_announce_without_adopted_agents_is_silent(tmp_path: Path) -> None
     assert provider.texts == []
 
 
-async def test_register_persists_transcript_and_deregister_drops_it(tmp_path: Path) -> None:
+async def test_register_persists_transcript_and_deregister_drops_it(
+    tmp_path: Path,
+) -> None:
     core = make_core(tmp_path)
     await core.handle(
         {

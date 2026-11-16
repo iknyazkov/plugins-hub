@@ -72,7 +72,9 @@ async def session_names() -> list[str]:
     return [line for line in out.decode().splitlines() if line]
 
 
-PANE_FORMAT = "#{pane_id}\t#{pane_current_command}\t#{pane_current_path}\t#{session_name}"
+PANE_FORMAT = (
+    "#{pane_id}\t#{pane_current_command}\t#{pane_current_path}\t#{session_name}"
+)
 
 
 def parse_panes(text: str) -> list[dict[str, str]]:
@@ -152,7 +154,9 @@ async def _run(args: list[str], stdin: bytes | None = None) -> None:
     proc = await asyncio.create_subprocess_exec(
         *_base(),
         *args,
-        stdin=asyncio.subprocess.PIPE if stdin is not None else asyncio.subprocess.DEVNULL,
+        stdin=asyncio.subprocess.PIPE
+        if stdin is not None
+        else asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.DEVNULL,
     )

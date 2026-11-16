@@ -31,7 +31,7 @@ from telegram.ext import (
 from telegram.request import HTTPXRequest
 
 from channelsrv import formatting
-from channelsrv.providers.base import CardButton, MessageId
+from channelsrv.providers.base import CardButton
 from channelsrv.server import Core
 
 log = logging.getLogger(__name__)
@@ -272,25 +272,13 @@ class TelegramProvider:
         markdown: str,
         buttons: Sequence[Sequence[CardButton]],
         instant: bool = False,  # lanes are the outbox's business, not ours
-    ) -> int | None:
+    ) -> None:
         text, entities = formatting.render(markdown)
-        message = await self._app.bot.send_message(
+        await self._app.bot.send_message(
             chat_id,
             text,
             entities=entities,
             reply_markup=_keyboard(buttons) if buttons else None,
-        )
-        message_id: int = message.message_id
-        return message_id
-
-    async def edit_text(
-        self, chat_id: int, message_id: MessageId, markdown: str, instant: bool = False
-    ) -> None:
-        # the outbox worker resolves refs before calling; here it is an int
-        assert isinstance(message_id, int)
-        text, entities = formatting.render(markdown)
-        await self._app.bot.edit_message_text(
-            chat_id=chat_id, message_id=message_id, text=text, entities=entities
         )
 
     async def chat_action(self, chat_id: int) -> None:

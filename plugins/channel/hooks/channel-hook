@@ -199,6 +199,36 @@ def on_session_end(ids: tuple[str, str, str]) -> None:
     op({"v": bridge.PROTOCOL_VERSION, "op": "deregister", "agent_id": ids[0]}, ids)
 
 
+def on_post_tool_use(input_data: dict, ids: tuple[str, str, str]) -> None:
+    """One ⚙ line per tool call — the daemon sends it as its own message.
+
+    The detail is picked hook-side so the frame stays small (Write/Edit
+    tool_input carries full file bodies); mirrors the daemon's tool_line
+    key priority: description, command, file_path, pattern, url, prompt.
+    """
+    name = str(input_data.get("tool_name", "tool"))
+    detail = ""
+    tool_input = input_data.get("tool_input")
+    if isinstance(tool_input, dict):
+        for key in ("description", "command", "file_path", "pattern", "url", "prompt"):
+            value = tool_input.get(key)
+            if isinstance(value, str) and value.strip():
+                detail = " ".join(value.split())
+                break
+    if len(detail) > 80:
+        detail = detail[:79] + "…"
+    op(
+        {
+            "v": bridge.PROTOCOL_VERSION,
+            "op": "tool",
+            "agent_id": ids[0],
+            "name": name,
+            "detail": detail,
+        },
+        ids,
+    )
+
+
 def on_permission_request(input_data: dict, ids: tuple[str, str, str]) -> None:
     """Approval card, then wait briefly for the Telegram verdict.
 
@@ -316,6 +346,8 @@ def main() -> None:
             on_stop(input_data, ids)
         elif event == "SessionEnd":
             on_session_end(ids)
+        elif event == "PostToolUse":
+            on_post_tool_use(input_data, ids)
         elif event in HANDLERS:
             HANDLERS[event](ids)
     except Exception as exc:  # never break the session
