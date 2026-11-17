@@ -60,3 +60,22 @@ def test_cleanup_spares_a_rebound_socket(tmp_path: Path) -> None:
 
 def test_cleanup_survives_missing_files(tmp_path: Path) -> None:
     cleanup_files(tmp_path, bound_ino=None)  # nothing exists — no raise
+
+
+# ------------------------------------------- one token = one daemon (youngest wins)
+
+
+def test_stale_pids_exclude_self_parent_and_non_channelsrv() -> None:
+    """The zombie incident (2026-11-17): a Monday daemon ignored SIGTERM and
+    lived beside the 0.2.0 one for days — 409 polling conflicts and ghost
+    re-streams from its stale tails. Startup enforcement selects exactly the
+    elders: every channelsrv pid except ours and our uv wrapper parent."""
+    from channelsrv.main import stale_pids
+
+    assert stale_pids(["14133 uv run channelsrv", "14134 .../channelsrv"], me=14134, parent=14133) == []
+    assert stale_pids(
+        ["14133 uv run channelsrv", "14134 .../channelsrv", "37460 .../channelsrv"],
+        me=37460,
+        parent=37459,
+    ) == [14133, 14134]
+    assert stale_pids(["5001 ruff server", ""], me=37460, parent=37459) == []

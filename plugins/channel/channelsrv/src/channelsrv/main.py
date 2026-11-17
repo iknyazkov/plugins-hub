@@ -13,7 +13,9 @@ import logging
 import logging.handlers
 import os
 import signal
+import subprocess
 import sys
+import time
 from pathlib import Path
 
 from telegram.error import BadRequest, Forbidden
@@ -70,11 +72,71 @@ def cleanup_files(base: Path, bound_ino: int | None) -> None:
         pass
 
 
+def stale_pids(lines: list[str], *, me: int, parent: int) -> list[int]:
+    """Pids of other channelsrv processes: the uv wrapper and the daemon
+    itself both match, ours and our wrapper's are excluded."""
+    pids: list[int] = []
+    for line in lines:
+        parts = line.split()
+        if not parts or not parts[0].isdigit():
+            continue
+        pid = int(parts[0])
+        if "channelsrv" not in line or pid in (me, parent):
+            continue
+        pids.append(pid)
+    return pids
+
+
+def kill_stale_daemons() -> None:
+    """One token = one daemon, enforced in process: the youngest wins.
+
+    A wedged elder can ignore SIGTERM for days (2026-11-17: a Monday zombie
+    outlived every /restart — only the command's recipient dies — feeding
+    409 polling conflicts and ghost re-streams from its stale tails). TERM
+    first, KILL after a short grace.
+    """
+    try:
+        out = subprocess.run(
+            ["pgrep", "-f", "channelsrv"], capture_output=True, text=True, timeout=5, check=False
+        )
+        listing = subprocess.run(
+            ["ps", "-o", "pid=,command="] + out.stdout.split(),
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=5,
+        ).stdout.splitlines()
+    except (OSError, subprocess.TimeoutExpired):
+        return
+    elders = stale_pids(listing, me=os.getpid(), parent=os.getppid())
+    for pid in elders:
+        log.warning("stale daemon %d — terminating (one token = one daemon)", pid)
+        with contextlib.suppress(OSError):
+            os.kill(pid, signal.SIGTERM)
+    if not elders:
+        return
+    time.sleep(2.0)
+    for pid in elders:
+        if proc_alive(pid):
+            log.warning("stale daemon %d ignored SIGTERM — killing", pid)
+            with contextlib.suppress(OSError):
+                os.kill(pid, signal.SIGKILL)
+
+
+def proc_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)  # signal 0: existence probe, nothing is delivered
+        return True
+    except OSError:
+        return False
+
+
 def main() -> None:
     base = config.base_dir()
     config.ensure_layout(base)
     config.apply_env_file(base)
     setup_logging(base / "logs" / "server.log")
+    kill_stale_daemons()
     try:
         cfg = config.load_config(base)
     except ConfigError as exc:

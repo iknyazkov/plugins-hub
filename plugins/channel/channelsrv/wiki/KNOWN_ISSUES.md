@@ -48,3 +48,15 @@ succeeded — yet the message the user sees never contained the edited text
 no longer depend on chain edits (ADR-0015), so the class is defused; if
 it reproduces in the chain itself, suspect `tail.messages` pointing at a
 stale/rolled message id (`progress.py`, `drain_chunks` rollover path).
+
+## Zombie daemon from a wedged shutdown (2026-11-17, FIXED in 0.2.1)
+
+A daemon spawned Monday midnight ignored SIGTERM (its graceful shutdown
+was stuck) and outlived every later /restart — /restart only kills the
+daemon that received the command. Two daemons on one token: 409 polling
+conflicts every ~35 s, and the zombie's stale tails re-streamed old
+transcript content as ghost duplicates of other agents' replies.
+Fix: `kill_stale_daemons()` at startup — the youngest daemon TERMs
+every other channelsrv process (uv wrappers included, own parent
+excluded) and KILLs the survivors after 2 s. Diagnosis shortcut:
+`ps aux | grep channelsrv` and `Conflict` lines in server.log.
