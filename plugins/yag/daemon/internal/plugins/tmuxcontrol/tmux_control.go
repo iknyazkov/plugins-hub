@@ -54,7 +54,7 @@ func (p *TmuxControlPlugin) OnGatewayStart(ctx context.Context) error {
 }
 
 func (p *TmuxControlPlugin) Tick(parameters plugin.TickParameters) error {
-	return nil
+	return removeRestrictedScreens()
 }
 
 func (p *TmuxControlPlugin) SendMessage(payload plugin.PayloadMessage) (*plugin.PayloadMessage, error) {
@@ -85,7 +85,7 @@ func (p *TmuxControlPlugin) sendKeys(target, text string) error {
 		return errors.New("target and text are required for send")
 	}
 
-	fullTarget := sessionPrefix + target
+	fullTarget := normalizeSessionName(target)
 	_, err := runTMux("send-keys", "-t", fullTarget, "--", text)
 	if err != nil {
 		return err
@@ -100,11 +100,7 @@ func submitInput(target string) error {
 }
 
 func (p *TmuxControlPlugin) capture(target string) (*plugin.PayloadMessage, error) {
-	if target == "" {
-		return nil, errors.New("target is required for capture")
-	}
-
-	output, err := runTMux("capture-pane", "-p", "-J", "-S", captureLines, "-t", sessionPrefix+target)
+	output, err := captureSession(normalizeSessionName(target))
 	if err != nil {
 		return nil, err
 	}
@@ -141,11 +137,40 @@ func (p *TmuxControlPlugin) killSession(name string) error {
 		return errors.New("name is required for kill-session")
 	}
 
-	_, err := runTMux("kill-session", "-t", sessionPrefix+name)
+	_, err := runTMux("kill-session", "-t", normalizeSessionName(name))
 	return err
 }
 
 func (p *TmuxControlPlugin) list() (*plugin.PayloadMessage, error) {
+	panes, err := listSessions()
+	if err != nil {
+		return nil, err
+	}
+
+	rawBytes, err := json.Marshal(panes)
+	if err != nil {
+		return nil, err
+	}
+
+	return &plugin.PayloadMessage{Message: rawBytes}, nil
+}
+
+// Private methods
+
+func normalizeSessionName(sessionName string) string {
+	return sessionPrefix + sessionName
+}
+
+func captureSession(panel string) (string, error) {
+	if panel == "" {
+		return "", errors.New("target is required for capture")
+	}
+
+	output, err := runTMux("capture-pane", "-p", "-J", "-S", captureLines, "-t", panel)
+	return output, err
+}
+
+func listSessions() ([]paneEntry, error) {
 	output, err := runTMux("list-panes", "-a", "-F", "#{session_name}\t#{pane_current_command}\t#{pane_title}")
 	if err != nil {
 		return nil, err
@@ -169,12 +194,7 @@ func (p *TmuxControlPlugin) list() (*plugin.PayloadMessage, error) {
 		})
 	}
 
-	rawBytes, err := json.Marshal(panes)
-	if err != nil {
-		return nil, err
-	}
-
-	return &plugin.PayloadMessage{Message: rawBytes}, nil
+	return panes, nil
 }
 
 func shellQuote(value string) string {
